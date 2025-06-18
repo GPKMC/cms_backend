@@ -1,0 +1,6 @@
+MONGODB_URL= mongodb+srv://karkibipl:biplovkarki@cmsdatabase.kznvlq9.mongodb.net/
+PORT = 5000
+JWT_SECRET=CMS_gpcollege
+GOOGLE_CLIENT_ID=11256643343-13ptru7cj4eke5i9jsm253gi70td9f1e.apps.googleusercontent.com
+GOOGLE_CLIENT_SECRET=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
+CLIENT_URL=http://localhost:3000
