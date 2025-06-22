@@ -6,6 +6,7 @@ import connectDB from './db.js';
 import userRouter from './users/user-routes.js';
 import authRouter from './users/user-auth.js';
 import googleAuthRouter from './users/googleAuth.js';
+import facultyRouter from './faculty/faculty_routes.js';
 
 
 connectDB();
@@ -18,6 +19,7 @@ app.use(express.json());
 app.use('/user-api', userRouter);
 app.use('/userAuth', authRouter);
 app.use('/api/auth', googleAuthRouter); // <-- mount Google OAuth routes here
+app.use('/faculty-api', facultyRouter);
 
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
