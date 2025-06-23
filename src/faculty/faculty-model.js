@@ -12,6 +12,11 @@ const facultySchema = new mongoose.Schema({
     required: true,
     unique: true, // Example: "BCA", "BBS"
   },
+  programLevel: {
+    type: String,
+    enum: ['bachelor', 'master'],
+    required: true, // 👈 NEW FIELD
+  },
   type: {
     type: String,
     enum: ['semester', 'yearly'],
