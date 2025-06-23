@@ -6,7 +6,7 @@ const courseSchema = new mongoose.Schema({
     required: true,
     trim: true,
   },
-  code: {                  // e.g., CS101
+  code: {
     type: String,
     required: true,
     unique: true,
@@ -14,36 +14,55 @@ const courseSchema = new mongoose.Schema({
   description: {
     type: String,
   },
-  faculty: {
+  semester: {
     type: mongoose.Schema.Types.ObjectId,
-    ref: 'Faculty',
+    ref: 'SemesterOrYear',
     required: true,
   },
-  semesters: [{            // Which semesters this course belongs to (can be multiple)
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'Semester',
-  }],
-  batches: [{              // Which batches are taking this course
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'Batch',
-  }],
-  materials: [{            // References to study materials for this course
+  slug: {
+    type: String,
+    unique: true,
+    index: true,
+  },
+  materials: [{
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Material',
   }],
-  assignments: [{          // References to assignments for this course
+  assignments: [{
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Assignment',
   }],
-  attendanceRecords: [{    // References to attendance records for this course
+  attendanceRecords: [{
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Attendance',
   }],
-  grades: [{               // References to grade records for this course
+  grades: [{
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Grade',
   }],
 }, { timestamps: true });
+
+// Generate slug from name and code before saving
+courseSchema.pre('save', function(next) {
+  if (!this.slug && this.name && this.code) {
+    this.slug = `${this.code.toLowerCase()}-${this.name.toLowerCase().replace(/\s+/g, '-')}`;
+  }
+  next();
+});
+
+// Post-save hook: add this course ID to the semester's courses array if not already there
+courseSchema.post('save', async function(doc, next) {
+  try {
+    if (doc.semester) {
+      await mongoose.model('SemesterOrYear').findByIdAndUpdate(doc.semester, {
+        $addToSet: { courses: doc._id },
+      });
+    }
+    next();
+  } catch (err) {
+    next(err);
+  }
+});
 
 const Course = mongoose.model('Course', courseSchema);
 export default Course;
