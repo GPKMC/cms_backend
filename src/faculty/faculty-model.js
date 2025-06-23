@@ -17,7 +17,7 @@ const facultySchema = new mongoose.Schema({
     enum: ['semester', 'yearly'],
     required: true,
   },
-  numberOfSemestersOrYears: {
+  totalSemestersOrYears: {
     type: Number,
     required: true, // 8 for BCA (semester), 4 for BBS (yearly)
   },
