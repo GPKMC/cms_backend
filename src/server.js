@@ -9,7 +9,7 @@ import googleAuthRouter from './users/googleAuth.js';
 import facultyRouter from './faculty/faculty_routes.js';
 import batchRouter from './batch/batch-routes.js';
 import semesterRouter from './semoryear/sem-year-routes.js';
-import courseRouter from './Education/eduModels/course-routes.js';
+import courseRouter from './course/course-routes.js';
 
 
 connectDB();

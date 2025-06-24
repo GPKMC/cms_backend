@@ -1,7 +1,7 @@
 import express from 'express';
 import mongoose from 'mongoose';
 import Course from './course-model.js';       // Adjust path as needed
-import SemesterOrYear from '../../semoryear/sem-model.js';
+import SemesterOrYear from '../semoryear/sem-model.js';
   // Adjust path as needed
 
 const courseRouter = express.Router();

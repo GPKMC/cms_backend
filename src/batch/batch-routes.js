@@ -10,7 +10,6 @@ const batchRouter = express.Router();
 batchRouter.post('/batch', async (req, res) => {
   try {
     const {
-      batchname,
       faculty,
       startYear,
       endYear,
@@ -18,7 +17,7 @@ batchRouter.post('/batch', async (req, res) => {
       currentSemesterOrYear,
     } = req.body;
 
-    if (!batchname || !faculty || !startYear || !currentSemesterOrYear) {
+    if (!faculty || !startYear || !currentSemesterOrYear) {
       return res.status(400).json({ success: false, message: "Missing required fields." });
     }
 
@@ -36,8 +35,16 @@ batchRouter.post('/batch', async (req, res) => {
       });
     }
 
+    // ✅ Check for duplicate → same faculty & startYear
+    const duplicate = await Batch.findOne({ faculty, startYear });
+    if (duplicate) {
+      return res.status(400).json({
+        success: false,
+        message: `A batch for ${facultyExists.code} starting in ${startYear} already exists.`,
+      });
+    }
+
     const newBatch = new Batch({
-      batchname,
       faculty,
       startYear,
       endYear,
@@ -88,69 +95,6 @@ batchRouter.get('/batch/:id', async (req, res) => {
   }
 });
 
-// Update batch partially
-batchRouter.patch('/batch/:id', async (req, res) => {
-  const { id } = req.params;
-
-  if (!mongoose.Types.ObjectId.isValid(id)) {
-    return res.status(400).json({ success: false, message: "Invalid batch ID" });
-  }
-
-  try {
-    const batch = await Batch.findById(id);
-    if (!batch) {
-      return res.status(404).json({ success: false, message: "Batch not found" });
-    }
-
-    // If faculty is updated, check if new faculty exists
-    if (req.body.faculty && req.body.faculty !== String(batch.faculty)) {
-      const facultyExists = await Faculty.findById(req.body.faculty);
-      if (!facultyExists) {
-        return res.status(400).json({ success: false, message: "New faculty does not exist." });
-      }
-      // Optional: Also validate currentSemesterOrYear if provided, since faculty changed
-      if (req.body.currentSemesterOrYear !== undefined &&
-          req.body.currentSemesterOrYear > facultyExists.totalSemestersOrYears) {
-        return res.status(400).json({
-          success: false,
-          message: `currentSemesterOrYear cannot exceed ${facultyExists.totalSemestersOrYears} for the new faculty.`,
-        });
-      }
-    }
-
-    // Determine which faculty to use for validation
-    const facultyIdToCheck = req.body.faculty || batch.faculty;
-    const faculty = await Faculty.findById(facultyIdToCheck);
-
-    if (!faculty) {
-      return res.status(400).json({ success: false, message: "Faculty not found." });
-    }
-
-    // Validate currentSemesterOrYear against faculty.totalSemestersOrYears if provided
-    if (req.body.currentSemesterOrYear !== undefined) {
-      if (req.body.currentSemesterOrYear > faculty.totalSemestersOrYears) {
-        return res.status(400).json({
-          success: false,
-          message: `currentSemesterOrYear cannot exceed ${faculty.totalSemestersOrYears} for this faculty.`,
-        });
-      }
-    }
-
-    // Update only the provided fields
-    Object.keys(req.body).forEach((key) => {
-      batch[key] = req.body[key];
-    });
-
-    await batch.save();
-
-    const updatedBatch = await Batch.findById(batch._id).populate('faculty');
-    res.status(200).json({ success: true, message: "Batch updated successfully", batch: updatedBatch });
-  } catch (error) {
-    console.error("Error updating batch:", error);
-    res.status(500).json({ success: false, message: "Server error updating batch." });
-  }
-});
-
 
 // Delete batch by ID
 batchRouter.delete('/batch/:id', async (req, res) => {
@@ -171,6 +115,63 @@ batchRouter.delete('/batch/:id', async (req, res) => {
   } catch (error) {
     console.error("Error deleting batch:", error);
     res.status(500).json({ success: false, message: "Server error deleting batch." });
+  }
+});
+//update batch 
+batchRouter.patch('/batch/:id', async (req, res) => {
+  const { id } = req.params;
+
+  if (!mongoose.Types.ObjectId.isValid(id)) {
+    return res.status(400).json({ success: false, message: "Invalid batch ID." });
+  }
+
+  try {
+    const batch = await Batch.findById(id).populate('faculty');
+    if (!batch) {
+      return res.status(404).json({ success: false, message: "Batch not found." });
+    }
+
+    // ❗ Prevent changing faculty after creation
+    if (req.body.faculty && req.body.faculty !== String(batch.faculty._id)) {
+      return res.status(400).json({ success: false, message: "Faculty cannot be changed once a batch is created." });
+    }
+
+    // ❗ Validate currentSemesterOrYear against totalSemestersOrYears if provided
+    if (req.body.currentSemesterOrYear !== undefined) {
+      if (req.body.currentSemesterOrYear > batch.faculty.totalSemestersOrYears) {
+        return res.status(400).json({
+          success: false,
+          message: `currentSemesterOrYear cannot exceed ${batch.faculty.totalSemestersOrYears} for this faculty.`,
+        });
+      }
+      batch.currentSemesterOrYear = req.body.currentSemesterOrYear;
+    }
+
+    // ✅ Update startYear if provided → regenerate batchname and slug
+    if (req.body.startYear) {
+      batch.startYear = req.body.startYear;
+      const facultyCode = batch.faculty.code.trim();
+      batch.batchname = `${facultyCode}_${batch.startYear}`;
+      batch.slug = `${facultyCode.toLowerCase()}-${batch.startYear}`;
+    }
+
+    // ✅ Update other optional fields
+    if (req.body.endYear !== undefined) batch.endYear = req.body.endYear;
+    if (req.body.isCompleted !== undefined) batch.isCompleted = req.body.isCompleted;
+
+    await batch.save();
+
+    const updatedBatch = await Batch.findById(batch._id).populate('faculty');
+
+    res.status(200).json({
+      success: true,
+      message: "Batch updated successfully.",
+      batch: updatedBatch
+    });
+
+  } catch (error) {
+    console.error("Error updating batch:", error);
+    res.status(500).json({ success: false, message: "Server error updating batch." });
   }
 });
 
