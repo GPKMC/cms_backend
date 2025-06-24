@@ -36,7 +36,7 @@ facultyRouter.get('/faculties/:id', authmiddleware,async (req, res) => {
 });
 
 // Update faculty
-facultyRouter.patch('/faculties/:id',authmiddleware, async (req, res) => {
+facultyRouter.put('/faculties/:id',authmiddleware, async (req, res) => {
   try {
     const updated = await Faculty.findByIdAndUpdate(req.params.id, req.body, { new: true, runValidators: true });
     if (!updated) return res.status(404).json({ message: 'Faculty not found' });
