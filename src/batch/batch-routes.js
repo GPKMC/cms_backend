@@ -6,10 +6,11 @@ import Faculty from "../faculty/faculty-model.js";
 
 const batchRouter = express.Router();
 
+// batchRouter.js or batch routes file
 batchRouter.post('/batch', async (req, res) => {
   try {
     const {
-      facultyCode, // ✅ Instead of "faculty"
+      facultyCode,
       startYear,
       endYear,
       isCompleted,
@@ -20,14 +21,20 @@ batchRouter.post('/batch', async (req, res) => {
       return res.status(400).json({ success: false, message: "Missing required fields." });
     }
 
-    // ✅ Find faculty by code (e.g., "BCA")
+    // New validation: startYear should not be greater than endYear
+    if (endYear && startYear > endYear) {
+      return res.status(400).json({
+        success: false,
+        message: "Start year cannot be greater than end year.",
+      });
+    }
+
     const facultyExists = await Faculty.findOne({ code: facultyCode.toUpperCase().trim() });
 
     if (!facultyExists) {
       return res.status(400).json({ success: false, message: "Faculty does not exist." });
     }
 
-    // Validate currentSemesterOrYear against faculty totalSemestersOrYears
     if (currentSemesterOrYear > facultyExists.totalSemestersOrYears) {
       return res.status(400).json({
         success: false,
@@ -35,7 +42,25 @@ batchRouter.post('/batch', async (req, res) => {
       });
     }
 
-    // ✅ Check for duplicate → same faculty & startYear
+    if (endYear) {
+      const yearGap = endYear - startYear;
+      if (facultyExists.programLevel === "bachelor") {
+        if (yearGap < 4 || yearGap > 5) {
+          return res.status(400).json({
+            success: false,
+            message: `For Bachelor programs, the end year must be 4 to 5 years after the start year.`,
+          });
+        }
+      } else if (facultyExists.programLevel === "master") {
+        if (yearGap < 2 || yearGap > 3) {
+          return res.status(400).json({
+            success: false,
+            message: `For Master programs, the end year must be 2 to 3 years after the start year.`,
+          });
+        }
+      }
+    }
+
     const duplicate = await Batch.findOne({
       faculty: facultyExists._id,
       startYear,
@@ -48,7 +73,6 @@ batchRouter.post('/batch', async (req, res) => {
       });
     }
 
-    // ✅ Create and save batch
     const newBatch = new Batch({
       faculty: facultyExists._id,
       startYear,
@@ -61,29 +85,78 @@ batchRouter.post('/batch', async (req, res) => {
 
     const populatedBatch = await Batch.findById(newBatch._id).populate('faculty');
 
-
     res.status(201).json({ success: true, message: "Batch created successfully", batch: populatedBatch });
+
   } catch (error) {
     console.error("Error creating batch:", error);
     res.status(500).json({ success: false, message: "Server error creating batch." });
   }
 });
 
+
+
 // Get all batches
 batchRouter.get('/batch', async (req, res) => {
   try {
-    const batches = await Batch.find()
+    const {
+      limit = 20,
+      search,
+      facultyType,      // 'semester' or 'yearly'
+      isCompleted       // 'true' or 'false'
+    } = req.query;
+
+    const query = {};
+
+    // Handle isCompleted filter
+    if (isCompleted !== undefined) {
+      query.isCompleted = isCompleted === 'true';
+    }
+
+    // Handle facultyType filter
+    let facultyIds = null;
+    if (facultyType === 'semester' || facultyType === 'yearly') {
+      const matchedFaculties = await Faculty.find({ type: facultyType }).select('_id');
+      facultyIds = matchedFaculties.map(f => f._id);
+      query.faculty = { $in: facultyIds };
+    }
+
+    // Handle global search
+    if (search) {
+      const matchedFaculties = await Faculty.find({
+        $or: [
+          { name: { $regex: search, $options: 'i' } },
+          { code: { $regex: search, $options: 'i' } },
+          ...(isNaN(Number(search)) ? [] : [{ totalSemestersOrYears: Number(search) }])
+        ]
+      }).select('_id');
+
+      const searchFacultyIds = matchedFaculties.map(f => f._id);
+
+      query.$or = [
+        { batchname: { $regex: search, $options: 'i' } },
+        ...(isNaN(Number(search)) ? [] : [{ startYear: Number(search) }]),
+        { faculty: { $in: searchFacultyIds } }
+      ];
+    }
+
+    // Fetch data
+    const batches = await Batch.find(query)
       .populate({
         path: 'faculty',
         select: '_id name code type totalSemestersOrYears'
       })
-      .sort({ createdAt: -1 });
+      .sort({ createdAt: -1 })
+      .limit(Number(limit));
 
-    res.json({ success: true, batches });
+    const totalCount = await Batch.countDocuments(query);
+
+    res.json({ success: true, batches, totalCount });
   } catch (err) {
+    console.error(err);
     res.status(500).json({ success: false, message: err.message });
   }
 });
+
 
 
 // Get single batch by ID
