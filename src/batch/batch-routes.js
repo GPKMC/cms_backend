@@ -3,11 +3,14 @@ import express from "express";
 // import { authmiddleware } from "../users/user-middleware";
 import Batch from "./batch-model.js";
 import Faculty from "../faculty/faculty-model.js";
+import authMiddleware from "../users/user-middleware.js";
+
+
 
 const batchRouter = express.Router();
 
 // batchRouter.js or batch routes file
-batchRouter.post('/batch', async (req, res) => {
+batchRouter.post('/batch',authMiddleware("admin"), async (req, res) => {
   try {
     const {
       facultyCode,
@@ -29,7 +32,7 @@ batchRouter.post('/batch', async (req, res) => {
       });
     }
 
-    const facultyExists = await Faculty.findOne({ code: facultyCode.toUpperCase().trim() });
+ const facultyExists = await Faculty.findOne({ code: facultyCode.trim() });
 
     if (!facultyExists) {
       return res.status(400).json({ success: false, message: "Faculty does not exist." });
@@ -96,12 +99,13 @@ batchRouter.post('/batch', async (req, res) => {
 
 
 // Get all batches
-batchRouter.get('/batch', async (req, res) => {
+batchRouter.get('/batch', authMiddleware("admin"), async (req, res) => {
   try {
     const {
       limit = 20,
       search,
       facultyType,      // 'semester' or 'yearly'
+      programLevel, // 'bachelor' or 'master'
       isCompleted       // 'true' or 'false'
     } = req.query;
 
@@ -119,6 +123,20 @@ batchRouter.get('/batch', async (req, res) => {
       facultyIds = matchedFaculties.map(f => f._id);
       query.faculty = { $in: facultyIds };
     }
+    // Handle programLevel filter
+if (programLevel === 'bachelor' || programLevel === 'master') {
+  const matchedFaculties = await Faculty.find({ programLevel }).select('_id');
+  const facultyIdsByProgram = matchedFaculties.map(f => f._id);
+
+  if (query.faculty && query.faculty.$in) {
+    // Intersect both faculty filters (facultyType + programLevel)
+    query.faculty.$in = query.faculty.$in.filter(id =>
+      facultyIdsByProgram.includes(id.toString())
+    );
+  } else {
+    query.faculty = { $in: facultyIdsByProgram };
+  }
+}
 
     // Handle global search
     if (search) {
@@ -143,7 +161,7 @@ batchRouter.get('/batch', async (req, res) => {
     const batches = await Batch.find(query)
       .populate({
         path: 'faculty',
-        select: '_id name code type totalSemestersOrYears'
+        select: '_id name code type programLevel totalSemestersOrYears'
       })
       .sort({ createdAt: -1 })
       .limit(Number(limit));
@@ -160,7 +178,7 @@ batchRouter.get('/batch', async (req, res) => {
 
 
 // Get single batch by ID
-batchRouter.get('/batch/:id', async (req, res) => {
+batchRouter.get('/batch/:id', authMiddleware("admin"),async (req, res) => {
   const { id } = req.params;
 
   if (!mongoose.Types.ObjectId.isValid(id)) {
@@ -182,7 +200,7 @@ batchRouter.get('/batch/:id', async (req, res) => {
 
 
 // Delete batch by ID
-batchRouter.delete('/batch/:id', async (req, res) => {
+batchRouter.delete('/batch/:id',authMiddleware("admin"), async (req, res) => {
   const { id } = req.params;
 
   if (!mongoose.Types.ObjectId.isValid(id)) {
@@ -212,46 +230,72 @@ batchRouter.patch('/batch/:id', async (req, res) => {
   try {
     const batch = await Batch.findById(id).populate({
       path: 'faculty',
-      select: '_id name code type totalSemestersOrYears'
+      select: '_id name code type totalSemestersOrYears programLevel'
     });
 
     if (!batch) {
       return res.status(404).json({ success: false, message: "Batch not found." });
     }
 
-    // Prevent changing faculty after creation
+    // Faculty change protection
     if (req.body.faculty && req.body.faculty !== String(batch.faculty._id)) {
       return res.status(400).json({ success: false, message: "Faculty cannot be changed once a batch is created." });
     }
 
-    // Validate currentSemesterOrYear against totalSemestersOrYears if provided
+    const totalAllowed = batch.faculty.totalSemestersOrYears;
+
+    // Validate currentSemesterOrYear
     if (req.body.currentSemesterOrYear !== undefined) {
-      if (req.body.currentSemesterOrYear > batch.faculty.totalSemestersOrYears) {
+      const current = req.body.currentSemesterOrYear;
+      if (current > totalAllowed || current < 1) {
         return res.status(400).json({
           success: false,
-          message: `currentSemesterOrYear cannot exceed ${batch.faculty.totalSemestersOrYears} for this faculty.`,
+          message: `currentSemesterOrYear must be between 1 and ${totalAllowed}.`
         });
       }
-      batch.currentSemesterOrYear = req.body.currentSemesterOrYear;
+      batch.currentSemesterOrYear = current;
     }
 
-    // Update startYear if provided → regenerate batchname and slug
-    if (req.body.startYear) {
-      batch.startYear = req.body.startYear;
+    // Validate startYear and endYear
+    if (req.body.startYear !== undefined) batch.startYear = req.body.startYear;
+    if (req.body.endYear !== undefined) batch.endYear = req.body.endYear;
+
+    const programLevel = batch.faculty.programLevel;
+    const yearGap = batch.endYear - batch.startYear;
+
+    if (programLevel === 'master') {
+      if (yearGap < 2 || yearGap > 3) {
+        return res.status(400).json({
+          success: false,
+          message: `Master program should have an endYear ${batch.startYear + 2} to ${batch.startYear + 3}.`
+        });
+      }
+    }
+
+    if (programLevel === 'bachelor') {
+      if (yearGap < 4 || yearGap > 5) {
+        return res.status(400).json({
+          success: false,
+          message: `Bachelor program should have an endYear ${batch.startYear + 4} to ${batch.startYear + 5}.`
+        });
+      }
+    }
+
+    // Recalculate batchname and slug
+    if (req.body.startYear !== undefined) {
       const facultyCode = batch.faculty.code.trim();
       batch.batchname = `${facultyCode}_${batch.startYear}`;
       batch.slug = `${facultyCode.toLowerCase()}-${batch.startYear}`;
     }
 
-    // Update other optional fields
-    if (req.body.endYear !== undefined) batch.endYear = req.body.endYear;
+    // Other fields
     if (req.body.isCompleted !== undefined) batch.isCompleted = req.body.isCompleted;
 
     await batch.save();
 
     const updatedBatch = await Batch.findById(batch._id).populate({
       path: 'faculty',
-      select: '_id name code type totalSemestersOrYears'
+      select: '_id name code type totalSemestersOrYears programLevel'
     });
 
     res.status(200).json({
@@ -265,6 +309,7 @@ batchRouter.patch('/batch/:id', async (req, res) => {
     res.status(500).json({ success: false, message: "Server error updating batch." });
   }
 });
+
 
 
 export default batchRouter;
