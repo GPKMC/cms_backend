@@ -1,34 +1,41 @@
 import express from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
-import User from './user-model.js';
-import { authmiddleware } from './user-middleware.js';
+
+import Admin from './admin-model.js';
+import Student from './student-model.js';
+import Teacher from './teacher-model.js';
+import authMiddleware from './user-middleware.js';
 
 
 const authRouter = express.Router();
 
-authRouter.get('/me', authmiddleware, async (req, res) => {
-  try {
-    const user = await User.findById(req.user.id).select('-password'); // Exclude password
-    if (!user) {
-      return res.status(404).json({ message: 'User not found' });
-    }
+const roleModelMap = {
+  admin: Admin,
+  student: Student,
+  teacher: Teacher,
+};
 
-    res.status(200).json({
-      user: {
-        id: user._id,
-        username: user.username,
-        email: user.email,
-        role: user.role,
-        createdAt: user.createdAt,
-      },
-    });
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ message: 'Server error' });
+// GET logged in user info
+authRouter.get('/me/:role', authMiddleware(req => req.params.role), async (req, res) => {
+  const role = req.params.role;
+  const user = req[role];
+
+  if (!user) {
+    return res.status(404).json({ message: `${role} not found` });
   }
+
+  res.status(200).json({
+    user: {
+      id: user._id,
+      username: user.username || user.name,
+      email: user.email,
+      createdAt: user.createdAt,
+    },
+  });
 });
 
+// LOGIN
 authRouter.post('/login', async (req, res) => {
   try {
     const { email, password, role } = req.body;
@@ -37,46 +44,37 @@ authRouter.post('/login', async (req, res) => {
       return res.status(400).json({ message: 'Email, password, and role are required.' });
     }
 
-    // Find the user by email
-    const user = await User.findOne({ email });
+    const Model = roleModelMap[role];
+    if (!Model) {
+      return res.status(400).json({ message: 'Invalid role provided.' });
+    }
+
+    const user = await Model.findOne({ email });
     if (!user) {
-      return res.status(400).json({ message: 'Invalid credentials.' });
+      return res.status(401).json({ message: 'Invalid credentials.' });
     }
 
-    // Check role matches
-    if (user.role !== role) {
-      return res.status(403).json({ message: `User does not have the role: ${role}` });
-    }
-
-    // Compare password
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) {
-      return res.status(400).json({ message: 'Invalid credentials.' });
+      return res.status(401).json({ message: 'Invalid credentials.' });
     }
 
-    // Generate JWT token
-    const token = jwt.sign(
-      {
-        id: user._id,
-        email: user.email,
-        role: user.role,
-      },
-      process.env.JWT_SECRET,
-      { expiresIn: '7d' } // You can adjust expiration
-    );
+    const token = jwt.sign({ id: user._id, role }, process.env.JWT_SECRET, {
+      expiresIn: '7d',
+    });
 
     res.status(200).json({
       message: 'Login successful',
       token,
       user: {
         id: user._id,
-        username: user.username,
+        username: user.username || user.name,
         email: user.email,
-        role: user.role,
+        role,
       },
     });
   } catch (error) {
-    console.error(error);
+    console.error('Login error:', error);
     res.status(500).json({ message: 'Server error' });
   }
 });
