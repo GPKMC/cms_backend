@@ -9,9 +9,7 @@ import authRouter from './users/user-auth.js';
 import facultyRouter from './faculty/faculty_routes.js';
 import batchRouter from './batch/batch-routes.js';
 import semesterRouter from './semoryear/sem-year-routes.js';
-import courseRouter from './course/course-routes.js';
-import adminRouter from './users/admin-routes.js';
-import adminAuthRouter from './users/user-auth.js';
+import courseRouter from './Education/eduModels/course-routes.js';
 
 
 connectDB();

@@ -10,16 +10,18 @@ const semesterOrYearSchema = new mongoose.Schema(
     },
     semesterNumber: {
       type: Number,
+      required: false, // required if faculty.type === "semester"
       min: 1,
     },
     yearNumber: {
       type: Number,
+      required: false, // required if faculty.type === "yearly"
       min: 1,
     },
     name: {
       type: String,
       trim: true,
-      unique: true,
+      unique: true,  // name should be unique for clarity
     },
     description: {
       type: String,
@@ -39,40 +41,50 @@ const semesterOrYearSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
+// Dynamic validation logic before saving:
 semesterOrYearSchema.pre("validate", async function (next) {
   const Faculty = mongoose.model("Faculty");
   const faculty = await Faculty.findById(this.faculty);
-  if (!faculty) return next(new Error("Faculty not found"));
 
-  if (faculty.type === "semester" && !this.semesterNumber)
+  if (!faculty) {
+    return next(new Error("Faculty not found"));
+  }
+
+  if (faculty.type === "semester" && !this.semesterNumber) {
     return next(new Error("semesterNumber is required for semester-based faculties."));
+  }
 
-  if (faculty.type === "yearly" && !this.yearNumber)
+  if (faculty.type === "yearly" && !this.yearNumber) {
     return next(new Error("yearNumber is required for yearly faculties."));
-
-  next();
-});
-
-semesterOrYearSchema.pre("save", async function (next) {
-  const Faculty = mongoose.model("Faculty");
-  const faculty = await Faculty.findById(this.faculty);
-  if (!faculty) return next(new Error("Faculty not found"));
-  if (!faculty.code || !faculty.type)
-    return next(new Error("Faculty must have code and type"));
-
-  const facultyCode = faculty.code.trim().toLowerCase();
-
-  if (faculty.type === "semester") {
-    this.name = `${this.semesterNumber}${getOrdinalSuffix(this.semesterNumber)} Semester ${facultyCode}`;
-    this.slug = `${this.semesterNumber}_sem_${facultyCode}`;
-  } else {
-    this.name = `${this.yearNumber}${getOrdinalSuffix(this.yearNumber)} Year ${facultyCode}`;
-    this.slug = `${this.yearNumber}_year_${facultyCode}`;
   }
 
   next();
 });
 
+// Generate name and slug before saving:
+semesterOrYearSchema.pre("save", async function (next) {
+  if (!this.name || !this.slug) {
+    const Faculty = mongoose.model("Faculty");
+    const faculty = await Faculty.findById(this.faculty);
+
+    if (faculty) {
+      const facultyCode = faculty.code.trim();
+      if (faculty.type === "semester") {
+        // e.g. "BCA 2nd Semester"
+        this.name = `${facultyCode} ${this.semesterNumber}${getOrdinalSuffix(this.semesterNumber)} Semester`;
+        this.slug = `${facultyCode.toLowerCase().replace(/\s+/g, "_")}_${this.semesterNumber}_sem`;
+      } else {
+        // e.g. "BBS 3rd Year"
+        this.name = `${facultyCode} ${this.yearNumber}${getOrdinalSuffix(this.yearNumber)} Year`;
+        this.slug = `${facultyCode.toLowerCase().replace(/\s+/g, "_")}_${this.yearNumber}_year`;
+      }
+    }
+  }
+
+  next();
+});
+
+// Helper function to get ordinal suffix like "st", "nd", "rd", "th"
 function getOrdinalSuffix(n) {
   if (typeof n !== "number") return "";
   const j = n % 10,

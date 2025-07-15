@@ -1,202 +1,241 @@
-import express from "express";
 import mongoose from "mongoose";
-import SemesterOrYear from "./sem-model.js";
+import express from "express";
 import Faculty from "../faculty/faculty-model.js";
+import SemesterOrYear from "./sem-model.js";
+
 
 const semesterRouter = express.Router();
 
-// GET ALL
-semesterRouter.get("/semesterOrYear", async (req, res) => {
-  try {
-    const semesters = await SemesterOrYear.find().populate("faculty courses");
-    res.json({ success: true, semesters });
-  } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
-  }
-});
-
-// GET BY ID
-semesterRouter.get("/semesterOrYear/:id", async (req, res) => {
-  if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
-    return res.status(400).json({ success: false, message: "Invalid ID." });
-  }
-  try {
-    const semester = await SemesterOrYear.findById(req.params.id).populate("faculty courses");
-    if (!semester) return res.status(404).json({ success: false, message: "Not found." });
-    res.json({ success: true, semester });
-  } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
-  }
-});
-
-// CREATE
+// Create semester/year
 semesterRouter.post("/semesterOrYear", async (req, res) => {
-  try {
-    const { faculty, semesterNumber, yearNumber, description } = req.body;
+    try {
+        const { faculty, semesterNumber, yearNumber, description } = req.body;
 
-    const facultyDoc = await Faculty.findById(faculty);
-    if (!facultyDoc) {
-      return res.status(400).json({ success: false, message: "Invalid faculty." });
+        if (!faculty) {
+            return res.status(400).json({ success: false, message: "Faculty is required." });
+        }
+
+        const facultyExists = await Faculty.findById(faculty);
+        if (!facultyExists) {
+            return res.status(400).json({ success: false, message: "Faculty does not exist." });
+        }
+
+        if (facultyExists.type === "semester") {
+            if (!semesterNumber) {
+                return res.status(400).json({ success: false, message: "semesterNumber is required for semester-based faculties." });
+            }
+
+            if (semesterNumber > facultyExists.totalSemestersOrYears) {
+                return res.status(400).json({
+                    success: false,
+                    message: `This faculty only allows ${facultyExists.totalSemestersOrYears} semesters.`,
+                });
+            }
+
+            const existing = await SemesterOrYear.findOne({ faculty, semesterNumber });
+            if (existing) {
+                return res.status(400).json({
+                    success: false,
+                    message: `Semester number ${semesterNumber} already exists for this faculty.`,
+                });
+            }
+        }
+
+        if (facultyExists.type === "yearly") {
+            if (!yearNumber) {
+                return res.status(400).json({ success: false, message: "yearNumber is required for yearly faculties." });
+            }
+
+            if (yearNumber > facultyExists.totalSemestersOrYears) {
+                return res.status(400).json({
+                    success: false,
+                    message: `This faculty only allows ${facultyExists.totalSemestersOrYears} years.`,
+                });
+            }
+
+            const existing = await SemesterOrYear.findOne({ faculty, yearNumber });
+            if (existing) {
+                return res.status(400).json({
+                    success: false,
+                    message: `Year number ${yearNumber} already exists for this faculty.`,
+                });
+            }
+        }
+
+        const newSemOrYear = new SemesterOrYear({
+            faculty,
+            semesterNumber,
+            yearNumber,
+            description,
+        });
+
+        await newSemOrYear.save();
+
+        const populatedEntry = await SemesterOrYear.findById(newSemOrYear._id).populate("faculty courses");
+
+        res.status(201).json({ success: true, message: "Semester/Year created successfully", semesterOrYear: populatedEntry });
+    } catch (error) {
+        console.error("Error creating semester/year:", error);
+        res.status(500).json({ success: false, message: "Server error creating semester/year." });
     }
-
-    const type = facultyDoc.type;
-    const number = type === "semester" ? semesterNumber : yearNumber;
-    const fieldKey = type === "semester" ? "semesterNumber" : "yearNumber";
-
-    if (!number || number < 1 || number > facultyDoc.totalSemestersOrYears) {
-      return res.status(400).json({
-        success: false,
-        message: `Number must be between 1 and ${facultyDoc.totalSemestersOrYears}`,
-      });
-    }
-
-    const existing = await SemesterOrYear.findOne({ faculty, [fieldKey]: number });
-    if (existing) {
-      return res.status(409).json({
-        success: false,
-        message: `A ${type} with number ${number} already exists for this faculty.`,
-      });
-    }
-
-    const { name, slug } = generateNameAndSlug(facultyDoc.code.trim().toLowerCase(), number, type);
-
-    const newSemester = new SemesterOrYear({
-      faculty,
-      semesterNumber: type === "semester" ? number : undefined,
-      yearNumber: type === "yearly" ? number : undefined,
-      description,
-      courses: [], // <== FORCE EMPTY on creation
-      name,
-      slug,
-    });
-
-    await newSemester.save();
-    const populated = await SemesterOrYear.findById(newSemester._id).populate("faculty courses");
-    res.status(201).json({ success: true, semesterOrYear: populated });
-  } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
-  }
 });
-
-
-// UPDATE
-semesterRouter.patch("/semesterOrYear/:id", async (req, res) => {
+semesterRouter.patch('/semesterOrYear/:id', async (req, res) => {
   const { id } = req.params;
 
   if (!mongoose.Types.ObjectId.isValid(id)) {
-    return res.status(400).json({ success: false, message: "Invalid ID." });
+    return res.status(400).json({ success: false, message: "Invalid semester/year ID." });
   }
 
   try {
-    const sem = await SemesterOrYear.findById(id).populate("faculty");
-    if (!sem || !sem.faculty) {
-      return res.status(404).json({ success: false, message: "Semester or Year not found." });
+    const semesterOrYear = await SemesterOrYear.findById(id);
+    if (!semesterOrYear) {
+      return res.status(404).json({ success: false, message: "Semester/Year not found." });
     }
 
-    const faculty = sem.faculty;
-    const type = faculty.type;
+    // Check if client tries to change faculty - forbid it
+    if (req.body.faculty && req.body.faculty !== String(semesterOrYear.faculty)) {
+      return res.status(400).json({ success: false, message: "Changing faculty is not allowed." });
+    }
 
-    if (req.body.description !== undefined) sem.description = req.body.description;
-    if (req.body.courses !== undefined) sem.courses = req.body.courses;
+    const facultyId = semesterOrYear.faculty?.toString();
+    if (!facultyId) {
+      return res.status(400).json({ success: false, message: "Faculty ID missing for this semester/year." });
+    }
 
-    if (type === "semester" && req.body.semesterNumber !== undefined) {
-      const number = req.body.semesterNumber;
-      if (number < 1 || number > faculty.totalSemestersOrYears) {
-        return res.status(400).json({
-          success: false,
-          message: `semesterNumber must be between 1 and ${faculty.totalSemestersOrYears}`,
-        });
+    const faculty = await Faculty.findById(facultyId);
+    if (!faculty) {
+      return res.status(400).json({ success: false, message: "Faculty not found." });
+    }
+
+    // Validate and update semesterNumber or yearNumber based on faculty.type
+    if (faculty.type === 'semester') {
+      const semesterNumber = req.body.semesterNumber !== undefined
+        ? Number(req.body.semesterNumber)
+        : semesterOrYear.semesterNumber;
+
+      if (!semesterNumber || isNaN(semesterNumber)) {
+        return res.status(400).json({ success: false, message: "Valid semesterNumber is required for semester-based faculties." });
       }
-      const exists = await SemesterOrYear.findOne({ 
-        _id: { $ne: id }, 
-        faculty: faculty._id, 
-        semesterNumber: number 
+      if (semesterNumber > faculty.totalSemestersOrYears) {
+        return res.status(400).json({ success: false, message: `Max allowed semesters: ${faculty.totalSemestersOrYears}.` });
+      }
+
+      const duplicate = await SemesterOrYear.findOne({
+        faculty: facultyId,
+        semesterNumber,
+        _id: { $ne: id }
       });
-      if (exists) {
-        return res.status(409).json({
-          success: false,
-          message: `Semester number ${number} already exists for this faculty.`,
-        });
+      if (duplicate) {
+        return res.status(400).json({ success: false, message: `Semester number ${semesterNumber} already exists for this faculty.` });
       }
-      sem.semesterNumber = number;
-      sem.yearNumber = undefined;
-    }
 
-    if (type === "yearly" && req.body.yearNumber !== undefined) {
-      const number = req.body.yearNumber;
-      if (number < 1 || number > faculty.totalSemestersOrYears) {
-        return res.status(400).json({
-          success: false,
-          message: `yearNumber must be between 1 and ${faculty.totalSemestersOrYears}`,
-        });
+      semesterOrYear.semesterNumber = semesterNumber;
+      semesterOrYear.yearNumber = undefined; // clear yearNumber if any
+
+    } else if (faculty.type === 'yearly') {
+      const yearNumber = req.body.yearNumber !== undefined
+        ? Number(req.body.yearNumber)
+        : semesterOrYear.yearNumber;
+
+      if (!yearNumber || isNaN(yearNumber)) {
+        return res.status(400).json({ success: false, message: "Valid yearNumber is required for yearly faculties." });
       }
-      const exists = await SemesterOrYear.findOne({ 
-        _id: { $ne: id }, 
-        faculty: faculty._id, 
-        yearNumber: number 
+      if (yearNumber > faculty.totalSemestersOrYears) {
+        return res.status(400).json({ success: false, message: `Max allowed years: ${faculty.totalSemestersOrYears}.` });
+      }
+
+      const duplicate = await SemesterOrYear.findOne({
+        faculty: facultyId,
+        yearNumber,
+        _id: { $ne: id }
       });
-      if (exists) {
-        return res.status(409).json({
-          success: false,
-          message: `Year number ${number} already exists for this faculty.`,
-        });
+      if (duplicate) {
+        return res.status(400).json({ success: false, message: `Year number ${yearNumber} already exists for this faculty.` });
       }
-      sem.yearNumber = number;
-      sem.semesterNumber = undefined;
+
+      semesterOrYear.yearNumber = yearNumber;
+      semesterOrYear.semesterNumber = undefined; // clear semesterNumber if any
+
+    } else {
+      return res.status(400).json({ success: false, message: "Unknown faculty type." });
     }
 
-    const number = type === "semester" ? sem.semesterNumber : sem.yearNumber;
-    if (number) {
-      const { name, slug } = generateNameAndSlug(faculty.code.trim().toLowerCase(), number, type);
-      sem.name = name;
-      sem.slug = slug;
+    // Update description if provided
+    if (req.body.description !== undefined) {
+      semesterOrYear.description = req.body.description;
     }
 
-    await sem.save();
-    const populated = await SemesterOrYear.findById(id).populate("faculty courses");
-    res.status(200).json({ success: true, semesterOrYear: populated });
+    // Update courses if provided and is an array
+    if (req.body.courses !== undefined) {
+      if (Array.isArray(req.body.courses)) {
+        semesterOrYear.courses = req.body.courses;
+      } else {
+        return res.status(400).json({ success: false, message: "Courses must be an array of course IDs." });
+      }
+    }
+
+    // Regenerate name and slug based on faculty.code and updated semester/year number
+    regenerateNameAndSlug(semesterOrYear, faculty);
+
+    await semesterOrYear.save();
+
+    const updatedEntry = await SemesterOrYear.findById(id).populate("faculty courses");
+
+    res.status(200).json({
+      success: true,
+      message: "Semester/Year updated successfully.",
+      semesterOrYear: updatedEntry,
+    });
+
   } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+    console.error("Error updating semester/year:", error);
+    res.status(500).json({ success: false, message: "Server error updating semester/year." });
   }
 });
 
-// DELETE
-semesterRouter.delete("/semesterOrYear/:id", async (req, res) => {
-  if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
-    return res.status(400).json({ success: false, message: "Invalid ID." });
-  }
-  try {
-    const semester = await SemesterOrYear.findByIdAndDelete(req.params.id);
-    if (!semester) return res.status(404).json({ success: false, message: "Not found." });
-    res.json({ success: true, message: "Deleted." });
-  } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
-  }
-});
+function regenerateNameAndSlug(semesterOrYear, faculty) {
+  const facultyCode = faculty.code.trim();
+  const facultySlug = facultyCode.toLowerCase().replace(/\s+/g, "_");
 
-// Utility functions
-function getOrdinalSuffix(n) {
-  if (typeof n !== "number") return "";
-  const j = n % 10, k = n % 100;
-  if (j === 1 && k !== 11) return "st";
-  if (j === 2 && k !== 12) return "nd";
-  if (j === 3 && k !== 13) return "rd";
-  return "th";
-}
-
-function generateNameAndSlug(facultyCode, number, type) {
-  const suffix = getOrdinalSuffix(number);
-  if (type === "semester") {
-    return {
-      name: `${number}${suffix} Semester ${facultyCode}`,
-      slug: `${number}_sem_${facultyCode}`,
-    };
+  if (faculty.type === "semester") {
+    semesterOrYear.name = `${facultyCode} ${semesterOrYear.semesterNumber}${getOrdinalSuffix(semesterOrYear.semesterNumber)} Semester`;
+    semesterOrYear.slug = `${facultySlug}_${semesterOrYear.semesterNumber}_sem`;
   } else {
-    return {
-      name: `${number}${suffix} Year ${facultyCode}`,
-      slug: `${number}_year_${facultyCode}`,
-    };
+    semesterOrYear.name = `${facultyCode} ${semesterOrYear.yearNumber}${getOrdinalSuffix(semesterOrYear.yearNumber)} Year`;
+    semesterOrYear.slug = `${facultySlug}_${semesterOrYear.yearNumber}_year`;
   }
 }
+
+function getOrdinalSuffix(n) {
+  if (typeof n !== 'number') return '';
+  const j = n % 10,
+    k = n % 100;
+  if (j === 1 && k !== 11) return 'st';
+  if (j === 2 && k !== 12) return 'nd';
+  if (j === 3 && k !== 13) return 'rd';
+  return 'th';
+}
+
+
+// Delete semester/year by ID
+semesterRouter.delete("/semesterOrYear/:id", async (req, res) => {
+    const { id } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+        return res.status(400).json({ success: false, message: "Invalid ID" });
+    }
+
+    try {
+        const deletedEntry = await SemesterOrYear.findByIdAndDelete(id);
+        if (!deletedEntry) {
+            return res.status(404).json({ success: false, message: "Semester/Year not found." });
+        }
+
+        res.status(200).json({ success: true, message: "Semester/Year deleted successfully", semesterOrYear: deletedEntry });
+    } catch (error) {
+        console.error("Error deleting semester/year:", error);
+        res.status(500).json({ success: false, message: "Server error deleting semester/year." });
+    }
+});
 
 export default semesterRouter;
