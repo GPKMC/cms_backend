@@ -3,14 +3,13 @@ import express from "express";
 // import { authmiddleware } from "../users/user-middleware";
 import Batch from "./batch-model.js";
 import Faculty from "../faculty/faculty-model.js";
-import authMiddleware from "../users/user-middleware.js";
 
 
 
 const batchRouter = express.Router();
 
 // batchRouter.js or batch routes file
-batchRouter.post('/batch',authMiddleware("admin"), async (req, res) => {
+batchRouter.post('/batch', async (req, res) => {
   try {
     const {
       facultyCode,
@@ -99,7 +98,7 @@ batchRouter.post('/batch',authMiddleware("admin"), async (req, res) => {
 
 
 // Get all batches
-batchRouter.get('/batch', authMiddleware("admin"), async (req, res) => {
+batchRouter.get('/batch', async (req, res) => {
   try {
     const {
       limit = 20,
@@ -178,7 +177,7 @@ if (programLevel === 'bachelor' || programLevel === 'master') {
 
 
 // Get single batch by ID
-batchRouter.get('/batch/:id', authMiddleware("admin"),async (req, res) => {
+batchRouter.get('/batch/:id',async (req, res) => {
   const { id } = req.params;
 
   if (!mongoose.Types.ObjectId.isValid(id)) {
@@ -200,7 +199,7 @@ batchRouter.get('/batch/:id', authMiddleware("admin"),async (req, res) => {
 
 
 // Delete batch by ID
-batchRouter.delete('/batch/:id',authMiddleware("admin"), async (req, res) => {
+batchRouter.delete('/batch/:id', async (req, res) => {
   const { id } = req.params;
 
   if (!mongoose.Types.ObjectId.isValid(id)) {

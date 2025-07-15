@@ -10,6 +10,8 @@ import facultyRouter from './faculty/faculty_routes.js';
 import batchRouter from './batch/batch-routes.js';
 import semesterRouter from './semoryear/sem-year-routes.js';
 import courseRouter from './course/course-routes.js';
+import adminRouter from './users/admin-routes.js';
+import adminAuthRouter from './users/user-auth.js';
 
 
 connectDB();
@@ -20,7 +22,8 @@ app.use(cors());
 app.use(express.json());
 
 // app.use('/user-api', userRouter);
-app.use('/userAuth', authRouter);
+app.use ('/admin-api',adminRouter)
+app.use('/admin-auth',adminAuthRouter)
 // app.use('/api/auth', googleAuthRouter); // <-- mount Google OAuth routes here
 app.use('/faculty-api', facultyRouter);
 app.use('/batch-api',batchRouter);
