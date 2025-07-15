@@ -1,30 +1,32 @@
-// middleware/admin-auth.js
-import jwt from "jsonwebtoken";
-import Admin from "./admin-model.js";
+import jwt from 'jsonwebtoken';
 
-
-const adminMiddleware = async (req, res, next) => {
-  const authHeader = req.headers.authorization;
-
-  if (!authHeader || !authHeader.startsWith("Bearer ")) {
-    return res.status(401).json({ message: "Unauthorized: No token provided" });
+export const authmiddleware = (req, res, next) => {
+  const { authorization } = req.headers;
+  if (!authorization || !authorization.startsWith('Bearer ')) {
+    return res.status(401).json({ message: 'Authorization header is missing' });
   }
 
-  const token = authHeader.split(" ")[1];
+  const token = authorization.split(' ')[1];  // ✅ This fixes your problem
 
   try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    
-    const admin = await Admin.findById(decoded.id).select("-password");
-    if (!admin) {
-      return res.status(404).json({ message: "Admin not found" });
-    }
-
-    req.admin = admin;
+    const userInfo = jwt.verify(token, process.env.JWT_SECRET);
+    req.user = userInfo;
+    console.log('Authenticated user:', req.user);
     next();
   } catch (err) {
-    res.status(401).json({ message: "Invalid or expired token" });
+    return res.status(401).json({ message: 'Invalid token' });
   }
 };
 
-export default adminMiddleware;
+
+export const authorizedRole = (...allowedroles)=>{
+    return (req,res, next)=>{
+        if(!req.user){
+            return res.status(401).json({ message: 'User not authenticated' });
+        }
+        if(!allowedroles.includes(req.user.role)){
+            return res.status(403).json({message:'Access forbidden : insufficient privileges'})
+        }
+next();
+    }
+}
