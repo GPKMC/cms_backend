@@ -1,61 +1,83 @@
-import express from "express";
-import bcrypt from "bcryptjs";
-import jwt from "jsonwebtoken";
-import Admin from "./admin-model.js";
-import adminMiddleware from "./user-middleware.js";
+import express from 'express';
+import bcrypt from 'bcryptjs';
+import jwt from 'jsonwebtoken';
+import User from './user-model.js';
+import { authmiddleware } from './user-middleware.js';
 
 
 const adminAuthRouter = express.Router();
 
-// POST /admin-auth/login
-adminAuthRouter.post("/login", async (req, res) => {
+authRouter.get('/me', authmiddleware, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id).select('-password'); // Exclude password
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    res.status(200).json({
+      user: {
+        id: user._id,
+        username: user.username,
+        email: user.email,
+        role: user.role,
+        createdAt: user.createdAt,
+      },
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+authRouter.post('/login', async (req, res) => {
   try {
     const { email, password } = req.body;
 
     if (!email || !password)
       return res.status(400).json({ message: "Email and password are required." });
 
-    if (!email.endsWith("@gpkmc.edu.np"))
-      return res.status(400).json({ message: "Email must end with @gpkmc.edu.np" });
+    // Find the user by email
+    const user = await User.findOne({ email });
+    if (!user) {
+      return res.status(400).json({ message: 'Invalid credentials.' });
+    }
 
-    const admin = await Admin.findOne({ email });
-    if (!admin)
-      return res.status(401).json({ message: "Invalid credentials." });
+    // Check role matches
+    if (user.role !== role) {
+      return res.status(403).json({ message: `User does not have the role: ${role}` });
+    }
 
-    const isMatch = await bcrypt.compare(password, admin.password);
-    if (!isMatch)
-      return res.status(401).json({ message: "Invalid credentials." });
+    // Compare password
+    const isMatch = await bcrypt.compare(password, user.password);
+    if (!isMatch) {
+      return res.status(400).json({ message: 'Invalid credentials.' });
+    }
 
-    const token = jwt.sign({ id: admin._id }, process.env.JWT_SECRET, {
-      expiresIn: "7d",
-    });
+    // Generate JWT token
+    const token = jwt.sign(
+      {
+        id: user._id,
+        email: user.email,
+        role: user.role,
+      },
+      process.env.JWT_SECRET,
+      { expiresIn: '7d' } // You can adjust expiration
+    );
 
     res.status(200).json({
       message: "Login successful",
       token,
-      admin: {
-        id: admin._id,
-        name: admin.name,
-        email: admin.email,
-        phone: admin.phone,
+      user: {
+        id: user._id,
+        username: user.username,
+        email: user.email,
+        role: user.role,
       },
     });
-  } catch (err) {
-    res.status(500).json({ message: "Server error", error: err.message });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: 'Server error' });
   }
-});
-
-// GET /admin-auth/me
-adminAuthRouter.get("/me", adminMiddleware, async (req, res) => {
-  res.status(200).json({
-    admin: {
-      id: req.admin._id,
-      name: req.admin.name,
-      email: req.admin.email,
-      phone: req.admin.phone,
-      createdAt: req.admin.createdAt,
-    },
-  });
 });
 
 export default adminAuthRouter;

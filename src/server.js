@@ -3,9 +3,9 @@ import 'dotenv/config';
 import cors from 'cors';
 
 import connectDB from './db.js';
-// import userRouter from './users/user-routes.js';
+import userRouter from './users/user-routes.js';
 import authRouter from './users/user-auth.js';
-// import googleAuthRouter from './users/googleAuth.js';
+import googleAuthRouter from './users/googleAuth.js';
 import facultyRouter from './faculty/faculty_routes.js';
 import batchRouter from './batch/batch-routes.js';
 import semesterRouter from './semoryear/sem-year-routes.js';
@@ -19,10 +19,9 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// app.use('/user-api', userRouter);
-app.use ('/admin-api',adminRouter)
-app.use('/admin-auth',adminAuthRouter)
-// app.use('/api/auth', googleAuthRouter); // <-- mount Google OAuth routes here
+app.use('/user-api', userRouter);
+app.use('/userAuth', authRouter);
+app.use('/api/auth', googleAuthRouter); // <-- mount Google OAuth routes here
 app.use('/faculty-api', facultyRouter);
 app.use('/batch-api',batchRouter);
 app.use('/sem-api',semesterRouter);
