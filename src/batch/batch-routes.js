@@ -6,46 +6,75 @@ import Faculty from "../faculty/faculty-model.js";
 
 const batchRouter = express.Router();
 
-// batchRouter.js or batch routes file
 batchRouter.post('/batch', async (req, res) => {
   try {
     const {
-      batchname,
-      faculty,
+      facultyCode, // e.g., "mEd"
       startYear,
       endYear,
       isCompleted,
       currentSemesterOrYear,
     } = req.body;
 
-    if (!batchname || !faculty || !startYear || !currentSemesterOrYear) {
-      return res.status(400).json({ success: false, message: "Missing required fields." });
+    // Validation: Required fields
+    if (!facultyCode || !startYear || !currentSemesterOrYear) {
+      return res.status(400).json({
+        success: false,
+        message: 'Missing required fields: facultyCode, startYear, or currentSemesterOrYear.',
+      });
     }
 
-    // New validation: startYear should not be greater than endYear
+    // Validation: startYear vs endYear
     if (endYear && startYear > endYear) {
       return res.status(400).json({
         success: false,
-        message: "Start year cannot be greater than end year.",
+        message: 'Start year cannot be greater than end year.',
       });
     }
 
-    const facultyExists = await Faculty.findOne({ code: facultyCode.toUpperCase().trim() });
+    // Find faculty (case-insensitive)
+    const faculty = await Faculty.findOne({
+      code: { $regex: `^${facultyCode.trim()}$`, $options: 'i' },
+    });
 
-    if (!facultyExists) {
-      return res.status(400).json({ success: false, message: "Faculty does not exist." });
-    }
-
-    if (currentSemesterOrYear > facultyExists.totalSemestersOrYears) {
+    if (!faculty) {
       return res.status(400).json({
         success: false,
-        message: `currentSemesterOrYear cannot exceed ${facultyExists.totalSemestersOrYears} for this faculty.`,
+        message: `Faculty with code '${facultyCode}' does not exist.`,
       });
     }
 
+    // Validation: semester/year range
+    if (
+      currentSemesterOrYear < 1 ||
+      currentSemesterOrYear > faculty.totalSemestersOrYears
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: `currentSemesterOrYear must be between 1 and ${faculty.totalSemestersOrYears} for ${faculty.code}.`,
+      });
+    }
+
+    // Check if batch already exists (same faculty and startYear)
+    const existingBatch = await Batch.findOne({
+      faculty: faculty._id,
+      startYear: startYear,
+    });
+
+    if (existingBatch) {
+      return res.status(400).json({
+        success: false,
+        message: `Batch for ${faculty.code} and ${startYear} already exists.`,
+      });
+    }
+
+    // Generate batchname
+    const batchname = `${faculty.code}_${startYear}`;
+
+    // Create batch
     const newBatch = new Batch({
       batchname,
-      faculty,
+      faculty: faculty._id,
       startYear,
       endYear,
       isCompleted: isCompleted || false,
@@ -56,15 +85,21 @@ batchRouter.post('/batch', async (req, res) => {
 
     const populatedBatch = await Batch.findById(newBatch._id).populate('faculty');
 
-    res.status(201).json({ success: true, message: "Batch created successfully", batch: populatedBatch });
+    res.status(201).json({
+      success: true,
+      message: 'Batch created successfully',
+      batch: populatedBatch,
+    });
 
   } catch (error) {
-    console.error("Error creating batch:", error);
-    res.status(500).json({ success: false, message: "Server error creating batch." });
+    console.error('Error creating batch:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Unexpected error occurred while creating batch.',
+      error: error.message,
+    });
   }
 });
-
-
 
 // Get all batches
 batchRouter.get('/batch', async (req, res) => {
@@ -72,32 +107,50 @@ batchRouter.get('/batch', async (req, res) => {
     const {
       limit = 20,
       search,
-      facultyType,      // 'semester' or 'yearly'
-      isCompleted  ,
-      programLevel,     // 'true' or 'false'
+      facultyType,
+      isCompleted,
+      facultyCode,      // e.g. 'BCA', 'MEd', etc.
+      programLevel,     // 👈 add this for bachelor/master filter
     } = req.query;
 
     const query = {};
+    let facultyIds = null;
 
-    // Handle isCompleted filter
+    // Filter by isCompleted
     if (isCompleted !== undefined) {
       query.isCompleted = isCompleted === 'true';
     }
 
-    // Handle facultyType filter
-    let facultyIds = null;
+    // Build faculty filters
+    const facultyFilter = {};
+
+    // 👇 ADD THIS
+    if (programLevel) {
+      facultyFilter.programLevel = programLevel;
+    }
+    // 👆 ADD THIS
+
     if (facultyType === 'semester' || facultyType === 'yearly') {
-      const matchedFaculties = await Faculty.find({ type: facultyType }).select('_id');
+      facultyFilter.type = facultyType;
+    }
+
+    if (facultyCode) {
+      facultyFilter.code = { $regex: `^${facultyCode.trim()}$`, $options: 'i' };
+    }
+
+    if (Object.keys(facultyFilter).length > 0) {
+      const matchedFaculties = await Faculty.find(facultyFilter).select('_id');
       facultyIds = matchedFaculties.map(f => f._id);
       query.faculty = { $in: facultyIds };
     }
 
-    // Handle global search
+    // Global search
     if (search) {
+      const searchRegex = { $regex: search, $options: 'i' };
       const matchedFaculties = await Faculty.find({
         $or: [
-          { name: { $regex: search, $options: 'i' } },
-          { code: { $regex: search, $options: 'i' } },
+          { name: searchRegex },
+          { code: searchRegex },
           ...(isNaN(Number(search)) ? [] : [{ totalSemestersOrYears: Number(search) }])
         ]
       }).select('_id');
@@ -105,13 +158,13 @@ batchRouter.get('/batch', async (req, res) => {
       const searchFacultyIds = matchedFaculties.map(f => f._id);
 
       query.$or = [
-        { batchname: { $regex: search, $options: 'i' } },
+        { batchname: searchRegex },
         ...(isNaN(Number(search)) ? [] : [{ startYear: Number(search) }]),
         { faculty: { $in: searchFacultyIds } }
       ];
     }
 
-    // Fetch data
+    // Fetch batches
     const batches = await Batch.find(query)
       .populate({
         path: 'faculty',
@@ -123,11 +176,14 @@ batchRouter.get('/batch', async (req, res) => {
     const totalCount = await Batch.countDocuments(query);
 
     res.json({ success: true, batches, totalCount });
+
   } catch (err) {
-    console.error(err);
+    console.error('Error fetching batches:', err);
     res.status(500).json({ success: false, message: err.message });
   }
 });
+
+
 
 
 

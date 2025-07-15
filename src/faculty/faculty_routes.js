@@ -23,6 +23,19 @@ facultyRouter.get('/faculties', authmiddleware, async (req, res) => {
     res.status(500).json({ message: err.message });
   }
 });
+facultyRouter.get('/facultycode', async (req, res) => {// fetching faculty codes based on program level to filter batches
+    try {
+        const { programLevel } = req.query;
+        let query = {};
+        if (programLevel) {
+            query.programLevel = programLevel; // Must match exactly 'bachelor' or 'master'
+        }
+        const faculties = await Faculty.find(query).sort({ name: 1 });
+        res.json({ success: true, faculties });
+    } catch (err) {
+        res.status(500).json({ success: false, message: err.message });
+    }
+});
 
 // Get one faculty by ID
 facultyRouter.get('/faculties/:id', authmiddleware,async (req, res) => {
