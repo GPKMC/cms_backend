@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import express from "express";
 import SemesterOrYear from "./sem-model.js";
 import Batch from "../batch/batch-model.js";
 import Faculty from "../faculty/faculty-model.js";

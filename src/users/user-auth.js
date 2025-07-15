@@ -5,7 +5,7 @@ import User from './user-model.js';
 import { authmiddleware } from './user-middleware.js';
 
 
-const adminAuthRouter = express.Router();
+const authRouter = express.Router();
 
 authRouter.get('/me', authmiddleware, async (req, res) => {
   try {
@@ -31,7 +31,7 @@ authRouter.get('/me', authmiddleware, async (req, res) => {
 
 authRouter.post('/login', async (req, res) => {
   try {
-    const { email, password } = req.body;
+    const { email, password ,role} = req.body;
 
     if (!email || !password)
       return res.status(400).json({ message: "Email and password are required." });
@@ -80,5 +80,5 @@ authRouter.post('/login', async (req, res) => {
   }
 });
 
-export default adminAuthRouter;
+export default authRouter;
  

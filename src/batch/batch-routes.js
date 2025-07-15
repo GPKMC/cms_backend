@@ -73,7 +73,8 @@ batchRouter.get('/batch', async (req, res) => {
       limit = 20,
       search,
       facultyType,      // 'semester' or 'yearly'
-      isCompleted       // 'true' or 'false'
+      isCompleted  ,
+      programLevel,     // 'true' or 'false'
     } = req.query;
 
     const query = {};
@@ -114,7 +115,7 @@ batchRouter.get('/batch', async (req, res) => {
     const batches = await Batch.find(query)
       .populate({
         path: 'faculty',
-        select: '_id name code type totalSemestersOrYears'
+        select: '_id name code type programLevel totalSemestersOrYears'
       })
       .sort({ createdAt: -1 })
       .limit(Number(limit));
