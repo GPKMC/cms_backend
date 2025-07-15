@@ -1,6 +1,7 @@
 import express from 'express';
 import Faculty from './faculty-model.js';
 import { authmiddleware } from '../users/user-middleware.js';
+import Batch from '../batch/batch-model.js';
 
 const facultyRouter = express.Router();
 
@@ -14,11 +15,24 @@ facultyRouter.post('/faculties', authmiddleware, async (req, res) => {
   }
 });
 
-// Get all faculties
 facultyRouter.get('/faculties', authmiddleware, async (req, res) => {
   try {
-    const faculties = await Faculty.find().sort({ createdAt: -1 });
-    res.json(faculties); 
+    // use .lean() so mongoose returns plain JS objects we can spread
+    const faculties = await Faculty.find()
+      .sort({ createdAt: -1 })
+      .lean();
+
+    const withCounts = await Promise.all(
+      faculties.map(async fac => {
+        const totalBatches = await Batch.countDocuments({ faculty: fac._id });
+        return { 
+          ...fac,
+          totalBatches  // just the number
+        };
+      })
+    );
+
+    res.json(withCounts);
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
@@ -37,16 +51,20 @@ facultyRouter.get('/facultycode', async (req, res) => {// fetching faculty codes
     }
 });
 
-// Get one faculty by ID
-facultyRouter.get('/faculties/:id', authmiddleware,async (req, res) => {
+
+// Get one faculty by ID + batch count
+facultyRouter.get('/faculties/:id', authmiddleware, async (req, res) => {
   try {
     const faculty = await Faculty.findById(req.params.id);
     if (!faculty) return res.status(404).json({ message: 'Faculty not found' });
-    res.json({ faculty });
+
+    const totalBatches = await Batch.countDocuments({ faculty: faculty._id });
+    res.json({ faculty, totalBatches });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
 });
+
 
 // Update faculty
 facultyRouter.put('/faculties/:id',authmiddleware, async (req, res) => {
