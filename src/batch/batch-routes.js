@@ -101,6 +101,17 @@ batchRouter.post('/batch', async (req, res) => {
   }
 });
 
+batchRouter.get('/batchcode', async (req, res) => {
+  try {
+    const facultyId = req.query.faculty;
+    const filter = facultyId ? { faculty: facultyId } : {};
+    const batches = await Batch.find(filter).sort({ createdAt: -1 });
+    res.json({ success: true, batches });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
 // Get all batches
 batchRouter.get('/batch', async (req, res) => {
   try {
