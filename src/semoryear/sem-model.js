@@ -45,9 +45,10 @@ const semesterOrYearSchema = new mongoose.Schema(
     endDate: {
       type: Date,
     },
-    isCompleted: {
-      type: Boolean,
-      default: false,
+    status: {
+      type: String,
+      enum: ["not_started", "ongoing", "completed"],
+      default: "not_started",
     },
   },
   { timestamps: true }
@@ -73,7 +74,7 @@ semesterOrYearSchema.pre("validate", async function (next) {
   next();
 });
 
-// Generate name, slug, dates before save
+// Generate name, slug, and dates before save
 semesterOrYearSchema.pre("save", async function (next) {
   const Faculty = mongoose.model("Faculty");
   const Batch = mongoose.model("Batch");
@@ -83,7 +84,6 @@ semesterOrYearSchema.pre("save", async function (next) {
 
   const facultyCode = faculty.code.trim().toLowerCase();
 
-  // Generate Name & Slug
   if (faculty.type === "semester") {
     this.name = `${batch.startYear} ${this.semesterNumber}${getOrdinalSuffix(this.semesterNumber)} Semester ${facultyCode}`;
     this.slug = `${batch.startYear}_${this.semesterNumber}_sem_${facultyCode}`;
@@ -92,36 +92,23 @@ semesterOrYearSchema.pre("save", async function (next) {
     this.slug = `${batch.startYear}_${this.yearNumber}_year_${facultyCode}`;
   }
 
-  // Set dates if startDate is provided
   if (this.startDate) {
     const durationMonths = faculty.type === "semester" ? 6 : 12;
     const calculatedEndDate = new Date(this.startDate);
     calculatedEndDate.setMonth(calculatedEndDate.getMonth() + durationMonths);
     this.endDate = calculatedEndDate;
-  }
 
-  // ✅ Auto-set isCompleted if endDate is in the past
-  if (this.endDate && new Date(this.endDate) < new Date()) {
-    this.isCompleted = true;
-  } else {
-    this.isCompleted = false;
+    console.log("Start Date:", this.startDate);
+    console.log("Calculated End Date:", this.endDate);
   }
 
   next();
 });
 
-// ✅ Also handle updates (findOneAndUpdate, etc.)
-semesterOrYearSchema.pre("findOneAndUpdate", function (next) {
-  const update = this.getUpdate();
-  if (update.endDate) {
-    const now = new Date();
-    const endDate = new Date(update.endDate);
-    update.isCompleted = endDate < now;
-    this.setUpdate(update);
-  }
-  next();
-});
 
+
+
+// Helper function to get ordinal suffix for numbers (1st, 2nd, 3rd, etc.)
 function getOrdinalSuffix(n) {
   if (typeof n !== "number") return "";
   const j = n % 10, k = n % 100;
