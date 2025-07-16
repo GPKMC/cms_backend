@@ -6,16 +6,61 @@ import Faculty from "../faculty/faculty-model.js";
 
 
 const semesterRouter = express.Router();
+const semesterNameToNumber = {
+  "First Semester": 1,
+  "Second Semester": 2,
+  "Third Semester": 3,
+  "Fourth Semester": 4,
+  "Fifth Semester": 5,
+  "Sixth Semester": 6,
+  "Seventh Semester": 7,
+  "Eighth Semester": 8
+};
+const numberToSemesterName = [
+  "",
+  "First Semester", "Second Semester", "Third Semester", "Fourth Semester",
+  "Fifth Semester", "Sixth Semester", "Seventh Semester", "Eighth Semester"
+];
 
-// ✅ GET ALL
 semesterRouter.get("/semesterOrYear", async (req, res) => {
   try {
-    const semesters = await SemesterOrYear.find().populate("faculty batch courses");
-    res.json({ success: true, semesters });
+    const semesters = await SemesterOrYear.find()
+      .populate({
+        path: "faculty",
+        select: "code"
+      })
+      .populate({
+        path: "batch",
+        select: "batchname"
+      })
+      .populate({
+        path: "courses",
+        select: "name"
+      })
+      .sort({ semesterNumber: 1, yearNumber: 1 });
+
+    const formatted = semesters.map(sem => ({
+      _id: sem._id,
+      semesterName: sem.semesterNumber
+        ? numberToSemesterName[sem.semesterNumber]
+        : sem.yearNumber
+          ? `Year ${sem.yearNumber}`
+          : "",
+      faculty: sem.faculty ? sem.faculty.code : "",
+      batch: sem.batch ? sem.batch.batchname : "",
+      startDate: sem.startDate,
+      endDate: sem.endDate,
+      courses: Array.isArray(sem.courses)
+        ? sem.courses.map(c => c.name)
+        : []
+    }));
+
+    res.json({ success: true, semesters: formatted });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
 });
+
 
 // ✅ GET BY ID
 semesterRouter.get("/semesterOrYear/:id", async (req, res) => {
@@ -31,40 +76,71 @@ semesterRouter.get("/semesterOrYear/:id", async (req, res) => {
   }
 });
 
-// ✅ POST (CREATE)
+
+
 semesterRouter.post("/semesterOrYear", async (req, res) => {
   try {
-    const { faculty, batch, semesterNumber, yearNumber, startDate, description, courses } = req.body;
-    const facultyDoc = await Faculty.findById(faculty);
-    const batchDoc = await Batch.findById(batch);
+    const payload = req.body;
 
-    if (!facultyDoc || !batchDoc) return res.status(400).json({ success: false, message: "Invalid faculty or batch." });
+    // Helper to process one semester object
+    const processSemester = async (item) => {
+      const { faculty, batch, semesterNumber, semesterName, yearNumber, startDate, description, courses } = item;
 
-    let number = facultyDoc.type === "semester" ? semesterNumber : yearNumber;
-    if (!number || number > facultyDoc.totalSemestersOrYears)
-      return res.status(400).json({ success: false, message: `Number must be between 1 and ${facultyDoc.totalSemestersOrYears}.` });
+      const facultyDoc = await Faculty.findById(faculty);
+      const batchDoc = await Batch.findById(batch);
 
-    const { name, slug } = generateNameAndSlug(batchDoc.startYear, facultyDoc.code.trim().toLowerCase(), number, facultyDoc.type);
+      if (!facultyDoc || !batchDoc)
+        throw new Error("Invalid faculty or batch.");
 
-    const newSemester = new SemesterOrYear({
-      faculty,
-      batch,
-      semesterNumber: facultyDoc.type === "semester" ? semesterNumber : undefined,
-      yearNumber: facultyDoc.type === "yearly" ? yearNumber : undefined,
-      description,
-      courses,
-      startDate,
-      slug,
-      name,
-    });
+      // Support "semesterName" as alternative to semesterNumber
+      let number = semesterNumber;
+      if (!number && semesterName) number = semesterNameToNumber[semesterName];
 
-    await newSemester.save();
-    const populated = await SemesterOrYear.findById(newSemester._id).populate("faculty batch courses");
-    res.status(201).json({ success: true, semesterOrYear: populated });
+      if (facultyDoc.type === "semester" && (!number || number > facultyDoc.totalSemestersOrYears))
+        throw new Error(`Semester number must be between 1 and ${facultyDoc.totalSemestersOrYears}.`);
+      if (facultyDoc.type === "yearly" && (!yearNumber || yearNumber > facultyDoc.totalSemestersOrYears))
+        throw new Error(`Year number must be between 1 and ${facultyDoc.totalSemestersOrYears}.`);
+
+      const { name, slug } = generateNameAndSlug(
+        batchDoc.startYear,
+        facultyDoc.code.trim().toLowerCase(),
+        number || yearNumber,
+        facultyDoc.type
+      );
+
+      const newSemester = new SemesterOrYear({
+        faculty,
+        batch,
+        semesterNumber: facultyDoc.type === "semester" ? number : undefined,
+        yearNumber: facultyDoc.type === "yearly" ? yearNumber : undefined,
+        description,
+        courses,
+        startDate,
+        slug,
+        name,
+      });
+
+      await newSemester.save();
+      // Optionally: populate faculty/batch/courses for response
+      return SemesterOrYear.findById(newSemester._id).populate("faculty batch courses");
+    };
+
+    // Bulk array support
+    if (Array.isArray(payload)) {
+      const promises = payload.map(item => processSemester(item));
+      const results = await Promise.all(promises);
+      return res.status(201).json({ success: true, semesters: results });
+    }
+
+    // Single object
+    const result = await processSemester(payload);
+    res.status(201).json({ success: true, semesterOrYear: result });
+
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
 });
+
 
 //put
 
