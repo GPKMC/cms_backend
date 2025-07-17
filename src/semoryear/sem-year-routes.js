@@ -15,6 +15,10 @@ const semesterNameToNumber = {
   "Sixth Semester": 6,
   "Seventh Semester": 7,
   "Eighth Semester": 8,
+  "First Year": 9,
+  "Second Year": 10,
+  "Third Year": 11,
+  "Fourth Year": 12,
 };
 const numberToSemesterName = [
   "",
@@ -26,6 +30,10 @@ const numberToSemesterName = [
   "Sixth Semester",
   "Seventh Semester",
   "Eighth Semester",
+  "First Year",
+  "Second Year",
+  "Third Year",
+  "Fourth Year",
 ];
 
 // Helper to compute status based on dates
@@ -36,6 +44,13 @@ function getStatusByDate(startDate, endDate) {
   if (!endDate) return "ongoing";
   if (now > endDate) return "completed";
   return "ongoing";
+}
+// Helper to find previous batch for the same faculty
+async function findPreviousBatchSameFaculty(currentBatchDoc) {
+  return await Batch.findOne({
+    faculty: currentBatchDoc.faculty,
+    startYear: { $lt: currentBatchDoc.startYear }
+  }).sort({ startYear: -1 });
 }
 
 // GET all semesters or years
@@ -134,6 +149,10 @@ semesterRouter.get("/semesterOrYear", async (req, res) => {
       "Sixth Semester",
       "Seventh Semester",
       "Eighth Semester",
+      "First Year",
+      "Second Year",
+      "Third Year",
+      "Fourth Year",
     ];
 
     const formatted = semesters.map((sem) => ({
@@ -141,8 +160,8 @@ semesterRouter.get("/semesterOrYear", async (req, res) => {
       semesterName: sem.semesterNumber
         ? numberToSemesterName[sem.semesterNumber]
         : sem.yearNumber
-        ? `Year ${sem.yearNumber}`
-        : "",
+          ? numberToSemesterName[sem.yearNumber + 8]
+          : "",
       faculty: sem.faculty ? sem.faculty.code : "",
       facultyName: sem.faculty ? sem.faculty.name : "",
       batch: sem.batch ? sem.batch.batchname : "",
@@ -213,12 +232,9 @@ semesterRouter.post("/semesterOrYear", async (req, res) => {
       // Validate startDate is not in the past
       if (startDate) {
         const today = new Date();
-        // Reset time for today to 00:00:00 to only compare dates
         today.setHours(0, 0, 0, 0);
-
         const start = new Date(startDate);
         start.setHours(0, 0, 0, 0);
-
         if (start < today) {
           throw new Error("Start date cannot be in the past.");
         }
@@ -264,6 +280,27 @@ semesterRouter.post("/semesterOrYear", async (req, res) => {
         throw new Error("Semester/Year with the same name or slug already exists.");
       }
 
+      // --- NEW LOGIC: Find courses from previous batch ---
+      let newCourses = courses || [];
+      const prevBatch = await findPreviousBatchSameFaculty(batchDoc);
+      if (prevBatch) {
+        const matchQuery = {
+          faculty: facultyDoc._id,
+          batch: prevBatch._id,
+        };
+        if (facultyDoc.type === "semester") matchQuery.semesterNumber = number;
+        if (facultyDoc.type === "yearly") matchQuery.yearNumber = yearNumber;
+        const prevSem = await SemesterOrYear.findOne(matchQuery);
+        if (prevSem && prevSem.courses && prevSem.courses.length) {
+          newCourses = prevSem.courses; // Use previous batch's courses for this semester/year
+        }
+        // Debug logs inside function:
+        // console.log('prevBatch:', prevBatch);
+        // console.log('matchQuery:', matchQuery);
+        // console.log('prevSem:', prevSem);
+        // console.log('newCourses:', newCourses);
+      }
+
       // Create new SemesterOrYear document
       const newSemester = new SemesterOrYear({
         faculty,
@@ -271,7 +308,7 @@ semesterRouter.post("/semesterOrYear", async (req, res) => {
         semesterNumber: facultyDoc.type === "semester" ? number : undefined,
         yearNumber: facultyDoc.type === "yearly" ? yearNumber : undefined,
         description,
-        courses,
+        courses: newCourses, // <- Always use newCourses!
         startDate,
         slug,
         name,
@@ -460,6 +497,20 @@ semesterRouter.delete("/semesterOrYear/:id", async (req, res) => {
     res.json({ success: true, message: "Deleted." });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
+  }
+});
+
+semesterRouter.delete("/semesterOrYear", async (req, res) => {
+  try {
+    const result = await SemesterOrYear.deleteMany({});
+    res.status(200).json({
+      success: true,
+      message: `All semesters/years deleted successfully.`,
+      deletedCount: result.deletedCount,
+    });
+  } catch (error) {
+    console.error("Error deleting semesters:", error);
+    res.status(500).json({ success: false, message: "Server error deleting semesters." });
   }
 });
 
