@@ -304,6 +304,17 @@ batchRouter.delete('/batch/:id', async (req, res) => {
     res.status(500).json({ success: false, message: "Server error deleting batch." });
   }
 });
+// Delete all batches
+batchRouter.delete('/batch', async (req, res) => {
+  try {
+    const result = await Batch.deleteMany({});
+    res.status(200).json({ success: true, message: "All batches deleted", deletedCount: result.deletedCount });
+  } catch (error) {
+    console.error("Error deleting batches:", error);
+    res.status(500).json({ success: false, message: "Server error deleting all batches." });
+  }
+});
+
 batchRouter.patch('/batch/:id', async (req, res) => {
   const { id } = req.params;
 

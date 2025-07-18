@@ -5,42 +5,68 @@ import SemesterOrYear from '../semoryear/sem-model.js';
   // Adjust path as needed
 
 const courseRouter = express.Router();
+// Utility: Validate a single course object
+async function validateCourse(course) {
+  const errors = [];
+  const { name, code, semester } = course;
+
+  if (!name) errors.push('Missing name');
+  if (!code) errors.push('Missing code');
+  if (!semester) errors.push('Missing semester');
+  if (semester && !mongoose.Types.ObjectId.isValid(semester)) errors.push('Invalid semester ID');
+
+  let semesterExists = null;
+  if (semester && mongoose.Types.ObjectId.isValid(semester)) {
+    semesterExists = await SemesterOrYear.findById(semester);
+    if (!semesterExists) errors.push('Semester not found');
+  }
+
+  return {
+    valid: errors.length === 0,
+    errors,
+    semesterExists,
+  };
+}
 
 courseRouter.post('/course', async (req, res) => {
   try {
-    // If body is an array, do bulk insert
+    // Bulk insert
     if (Array.isArray(req.body)) {
       const inserted = [];
+      const skipped = [];
       for (const item of req.body) {
+        const { valid, errors } = await validateCourse(item);
+        if (!valid) {
+          skipped.push({ course: item, errors });
+          continue;
+        }
         const { name, code, description, semester } = item;
-        if (!name || !code || !semester) continue; // skip invalid
-        if (!mongoose.Types.ObjectId.isValid(semester)) continue;
-        const semesterExists = await SemesterOrYear.findById(semester);
-        if (!semesterExists) continue;
-
         const newCourse = new Course({ name, code, description, semester });
         await newCourse.save();
         inserted.push(await Course.findById(newCourse._id).populate('semester'));
       }
-      return res.status(201).json({ message: 'Courses created', courses: inserted });
+      return res.status(201).json({
+        message: 'Bulk course creation complete.',
+        insertedCount: inserted.length,
+        skippedCount: skipped.length,
+        courses: inserted,
+        skipped,
+      });
     }
 
-    // else, single course insert (your original logic)
+    // Single insert
+    const { valid, errors } = await validateCourse(req.body);
+    if (!valid) {
+      return res.status(400).json({ error: errors.join(', ') });
+    }
     const { name, code, description, semester } = req.body;
-    if (!name || !code || !semester) {
-      return res.status(400).json({ error: 'Name, code, and semester are required.' });
-    }
-    if (!mongoose.Types.ObjectId.isValid(semester)) {
-      return res.status(400).json({ error: 'Invalid semester ID.' });
-    }
-    const semesterExists = await SemesterOrYear.findById(semester);
-    if (!semesterExists) {
-      return res.status(400).json({ error: 'Semester not found.' });
-    }
     const newCourse = new Course({ name, code, description, semester });
     await newCourse.save();
     const populatedCourse = await Course.findById(newCourse._id).populate('semester');
-    res.status(201).json({ message: 'Course created successfully', course: populatedCourse });
+    res.status(201).json({
+      message: 'Course created successfully',
+      course: populatedCourse,
+    });
 
   } catch (error) {
     console.error('Error creating course:', error);
@@ -152,7 +178,7 @@ courseRouter.patch('/course/:id', async (req, res) => {
   }
 });
 
-// Delete course
+// Delete course bu id
 courseRouter.delete('/course/:id', async (req, res) => {
   const { id } = req.params;
 
@@ -170,6 +196,16 @@ courseRouter.delete('/course/:id', async (req, res) => {
   } catch (error) {
     console.error('Error deleting course:', error);
     res.status(500).json({ error: 'Server error deleting course.' });
+  }
+});
+// Delete all courses
+courseRouter.delete('/courses', async (req, res) => {
+  try {
+    const result = await Course.deleteMany({});
+    res.json({ message: 'All courses deleted successfully', deletedCount: result.deletedCount });
+  } catch (error) {
+    console.error('Error deleting all courses:', error);
+    res.status(500).json({ error: 'Server error deleting all courses.' });
   }
 });
 
