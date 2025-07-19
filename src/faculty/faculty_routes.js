@@ -1,12 +1,12 @@
 import express from 'express';
 import Faculty from './faculty-model.js';
-import { authmiddleware } from '../users/user-middleware.js';
+import { authmiddleware, authorizedRole } from '../users/user-middleware.js';
 import Batch from '../batch/batch-model.js';
 
 const facultyRouter = express.Router();
 
 // Create one faculty
-facultyRouter.post('/faculties', authmiddleware, async (req, res) => {
+facultyRouter.post('/faculties',authmiddleware,authorizedRole("admin"), async (req, res) => {
   try {
     const faculty = await Faculty.create(req.body);
     res.status(201).json({ message: 'Faculty created', faculty });
@@ -15,7 +15,7 @@ facultyRouter.post('/faculties', authmiddleware, async (req, res) => {
   }
 });
 
-facultyRouter.get('/faculties', authmiddleware, async (req, res) => {
+facultyRouter.get('/faculties',authmiddleware,authorizedRole("admin"), async (req, res) => {
   try {
     // use .lean() so mongoose returns plain JS objects we can spread
     const faculties = await Faculty.find()
@@ -37,7 +37,7 @@ facultyRouter.get('/faculties', authmiddleware, async (req, res) => {
     res.status(500).json({ message: err.message });
   }
 });
-facultyRouter.get('/facultycode', async (req, res) => {// fetching faculty codes based on program level to filter batches
+facultyRouter.get('/facultycode', authmiddleware,authorizedRole("admin"),async (req, res) => {// fetching faculty codes based on program level to filter batches
     try {
         const { programLevel } = req.query;
         let query = {};
@@ -53,7 +53,7 @@ facultyRouter.get('/facultycode', async (req, res) => {// fetching faculty codes
 
 
 // Get one faculty by ID + batch count
-facultyRouter.get('/faculties/:id', authmiddleware, async (req, res) => {
+facultyRouter.get('/faculties/:id',authmiddleware,authorizedRole("admin"), async (req, res) => {
   try {
     const faculty = await Faculty.findById(req.params.id);
     if (!faculty) return res.status(404).json({ message: 'Faculty not found' });
@@ -67,7 +67,7 @@ facultyRouter.get('/faculties/:id', authmiddleware, async (req, res) => {
 
 
 // Update faculty
-facultyRouter.put('/faculties/:id',authmiddleware, async (req, res) => {
+facultyRouter.put('/faculties/:id',authmiddleware,authorizedRole("admin"), async (req, res) => {
   try {
     const updated = await Faculty.findByIdAndUpdate(req.params.id, req.body, { new: true, runValidators: true });
     if (!updated) return res.status(404).json({ message: 'Faculty not found' });
@@ -78,7 +78,7 @@ facultyRouter.put('/faculties/:id',authmiddleware, async (req, res) => {
 });
 
 // Delete faculty
-facultyRouter.delete('/faculties/:id',authmiddleware, async (req, res) => {
+facultyRouter.delete('/faculties/:id',authmiddleware,authorizedRole("admin"), async (req, res) => {
   try {
     const deleted = await Faculty.findByIdAndDelete(req.params.id);
     if (!deleted) return res.status(404).json({ message: 'Faculty not found' });

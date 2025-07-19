@@ -9,7 +9,7 @@ const BatchSchema = new mongoose.Schema({
   faculty: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Faculty',
-    required: true, // Every batch MUST belong to a faculty
+    required: true,
   },
   startYear: {
     type: Number,
@@ -22,7 +22,7 @@ const BatchSchema = new mongoose.Schema({
   },
   currentSemesterOrYear: {
     type: Number,
-    required: true, // Example: 5 (5th semester or 3rd year depending on faculty.type)
+    required: true,
   },
   slug: {
     type: String,
@@ -30,33 +30,23 @@ const BatchSchema = new mongoose.Schema({
   },
 }, { timestamps: true });
 
-BatchSchema.pre('save', function (next) {
-  if (!this.slug && this.batchname && this.startYear) {
-    this.slug = `${this.startYear}-${this.batchname.toLowerCase().replace(/\s+/g, '-')}`;
-  }
-  next();
-});
 BatchSchema.pre('save', async function (next) {
   try {
-    // Only generate if batchname is missing or empty
+    // Generate batchname if missing
     if ((!this.batchname || this.batchname.trim() === '') && this.faculty && this.startYear) {
-      // Fetch faculty document to get the code
       const Faculty = mongoose.model('Faculty');
       const facultyDoc = await Faculty.findById(this.faculty);
 
       if (facultyDoc && facultyDoc.code) {
         this.batchname = `${facultyDoc.code.trim()} ${this.startYear}`;
       } else {
-        // If faculty or code missing, fallback or throw error
         return next(new Error('Faculty code not found for batchname generation'));
       }
     }
-
-    // Generate slug based on batchname and startYear (optional: keep your current slug generation)
+    // Generate slug
     if (!this.slug && this.batchname && this.startYear) {
       this.slug = `${this.startYear}-${this.batchname.toLowerCase().replace(/\s+/g, '-')}`;
     }
-
     next();
   } catch (error) {
     next(error);

@@ -34,10 +34,10 @@ const facultySchema = new mongoose.Schema({
     type: String,
     unique: true,
   },
-    batches: [{
-    type: mongoose.Schema.Types.ObjectId,
-    ref:  'Batch',
-  }],
+  //   batches: [{
+  //   type: mongoose.Schema.Types.ObjectId,
+  //   ref:  'Batch',
+  // }],
 }, { timestamps: true });
 
 // Generate slug before saving

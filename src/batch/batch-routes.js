@@ -1,12 +1,12 @@
 import mongoose from "mongoose";
 import express from "express";
-// import { authmiddleware } from "../users/user-middleware";
+ import { authmiddleware, authorizedRole } from "../users/user-middleware.js";
 import Batch from "./batch-model.js";
 import Faculty from "../faculty/faculty-model.js";
 
 const batchRouter = express.Router();
 
-batchRouter.post('/batch', async (req, res) => {
+batchRouter.post('/batch',authmiddleware,authorizedRole("admin"), async (req, res) => {
   try {
     const {
       facultyCode, // e.g., "mEd"
@@ -55,6 +55,26 @@ batchRouter.post('/batch', async (req, res) => {
       });
     }
 
+    // --- Year gap validation ---
+    if (endYear) {
+      const gap = endYear - startYear;
+      if (faculty.programLevel === "bachelor") {
+        if (gap < 4 || gap > 5) {
+          return res.status(400).json({
+            success: false,
+            message: "For bachelor, endYear must be 4 to 5 years after startYear.",
+          });
+        }
+      } else if (faculty.programLevel === "master") {
+        if (gap < 2 || gap > 3) {
+          return res.status(400).json({
+            success: false,
+            message: "For master, endYear must be 2 to 3 years after startYear.",
+          });
+        }
+      }
+    }
+
     // Check if batch already exists (same faculty and startYear)
     const existingBatch = await Batch.findOne({
       faculty: faculty._id,
@@ -101,7 +121,8 @@ batchRouter.post('/batch', async (req, res) => {
   }
 });
 
-batchRouter.get('/batchcode', async (req, res) => {
+
+batchRouter.get('/batchcode',authmiddleware,authorizedRole("admin"), async (req, res) => {
   try {
     const facultyId = req.query.faculty;
     const filter = facultyId ? { faculty: facultyId } : {};
@@ -113,7 +134,7 @@ batchRouter.get('/batchcode', async (req, res) => {
 });
 
 // Get all batches
-batchRouter.get('/batch', async (req, res) => {
+batchRouter.get('/batch',authmiddleware,authorizedRole("admin"), async (req, res) => {
   try {
     const {
       limit = 20,
@@ -199,7 +220,7 @@ batchRouter.get('/batch', async (req, res) => {
 
 
 // Get single batch by ID
-batchRouter.get('/batch/:id', async (req, res) => {
+batchRouter.get('/batch/:id',authmiddleware,authorizedRole("admin"), async (req, res) => {
   const { id } = req.params;
 
   if (!mongoose.Types.ObjectId.isValid(id)) {
@@ -220,7 +241,7 @@ batchRouter.get('/batch/:id', async (req, res) => {
 });
 
 // Update batch partially
-batchRouter.patch('/batch/:id', async (req, res) => {
+batchRouter.patch('/batch/:id', authmiddleware, authorizedRole("admin"), async (req, res) => {
   const { id } = req.params;
 
   if (!mongoose.Types.ObjectId.isValid(id)) {
@@ -267,6 +288,30 @@ batchRouter.patch('/batch/:id', async (req, res) => {
       }
     }
 
+    // YEAR GAP VALIDATION (same as in POST)
+    // Determine final startYear and endYear (from request or existing batch)
+    const startYear = req.body.startYear !== undefined ? req.body.startYear : batch.startYear;
+    const endYear = req.body.endYear !== undefined ? req.body.endYear : batch.endYear;
+
+    if (endYear) {
+      const gap = endYear - startYear;
+      if (faculty.programLevel === "bachelor") {
+        if (gap < 4 || gap > 5) {
+          return res.status(400).json({
+            success: false,
+            message: "For bachelor, endYear must be 4 to 5 years after startYear.",
+          });
+        }
+      } else if (faculty.programLevel === "master") {
+        if (gap < 2 || gap > 3) {
+          return res.status(400).json({
+            success: false,
+            message: "For master, endYear must be 2 to 3 years after startYear.",
+          });
+        }
+      }
+    }
+
     // Update only the provided fields
     Object.keys(req.body).forEach((key) => {
       batch[key] = req.body[key];
@@ -283,8 +328,9 @@ batchRouter.patch('/batch/:id', async (req, res) => {
 });
 
 
+
 // Delete batch by ID
-batchRouter.delete('/batch/:id', async (req, res) => {
+batchRouter.delete('/batch/:id',authmiddleware,authorizedRole("admin"), async (req, res) => {
   const { id } = req.params;
 
   if (!mongoose.Types.ObjectId.isValid(id)) {
@@ -305,7 +351,7 @@ batchRouter.delete('/batch/:id', async (req, res) => {
   }
 });
 // Delete all batches
-batchRouter.delete('/batch', async (req, res) => {
+batchRouter.delete('/batch',authmiddleware,authorizedRole("admin"), async (req, res) => {
   try {
     const result = await Batch.deleteMany({});
     res.status(200).json({ success: true, message: "All batches deleted", deletedCount: result.deletedCount });
@@ -314,6 +360,18 @@ batchRouter.delete('/batch', async (req, res) => {
     res.status(500).json({ success: false, message: "Server error deleting all batches." });
   }
 });
+// Example backend route (Express)
+batchRouter.get('/batch/by-slug/:slug', async (req, res) => {
+  const { slug } = req.params;
+  try {
+    const batch = await Batch.findOne({ slug });
+    if (!batch) return res.status(404).json({ message: 'Batch not found' });
+    res.json({ batch });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
 
 batchRouter.patch('/batch/:id', async (req, res) => {
   const { id } = req.params;
