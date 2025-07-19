@@ -1,24 +1,26 @@
 import express from 'express';
 import mongoose from 'mongoose';
-import Course from './course-model.js';       // Adjust path as needed
-import SemesterOrYear from '../semoryear/sem-model.js';
-  // Adjust path as needed
+import Course from './course-model.js'; // Adjust path as needed
+import SemesterOrYear from '../semoryear/sem-model.js'; // Adjust path as needed
+import { authmiddleware, authorizedRole } from '../users/user-middleware.js';
 
 const courseRouter = express.Router();
+
 // Utility: Validate a single course object
 async function validateCourse(course) {
   const errors = [];
-  const { name, code, semester } = course;
+  const { name, code, semesterOrYear, type } = course;
 
   if (!name) errors.push('Missing name');
   if (!code) errors.push('Missing code');
-  if (!semester) errors.push('Missing semester');
-  if (semester && !mongoose.Types.ObjectId.isValid(semester)) errors.push('Invalid semester ID');
+  if (!semesterOrYear) errors.push('Missing semesterOrYear');
+  if (semesterOrYear && !mongoose.Types.ObjectId.isValid(semesterOrYear)) errors.push('Invalid semesterOrYear ID');
+  if (!type || !["compulsory", "elective"].includes(type)) errors.push('Invalid type (must be compulsory or elective)');
 
   let semesterExists = null;
-  if (semester && mongoose.Types.ObjectId.isValid(semester)) {
-    semesterExists = await SemesterOrYear.findById(semester);
-    if (!semesterExists) errors.push('Semester not found');
+  if (semesterOrYear && mongoose.Types.ObjectId.isValid(semesterOrYear)) {
+    semesterExists = await SemesterOrYear.findById(semesterOrYear);
+    if (!semesterExists) errors.push('SemesterOrYear not found');
   }
 
   return {
@@ -28,7 +30,8 @@ async function validateCourse(course) {
   };
 }
 
-courseRouter.post('/course', async (req, res) => {
+// POST: create (bulk or single)
+courseRouter.post('/course', authmiddleware, authorizedRole("admin"), async (req, res) => {
   try {
     // Bulk insert
     if (Array.isArray(req.body)) {
@@ -40,11 +43,30 @@ courseRouter.post('/course', async (req, res) => {
           skipped.push({ course: item, errors });
           continue;
         }
-        const { name, code, description, semester } = item;
-        const newCourse = new Course({ name, code, description, semester });
+        const { name, code, description, semesterOrYear, type } = item;
+        const exists = await Course.findOne({ code });
+        if (exists) {
+          skipped.push({ course: item, errors: ["Duplicate code"] });
+          continue;
+        }
+        const newCourse = new Course({ name, code, description, semesterOrYear, type });
         await newCourse.save();
-        inserted.push(await Course.findById(newCourse._id).populate('semester'));
+        inserted.push(await Course.findById(newCourse._id).populate({
+          path: 'semesterOrYear',
+          populate: { path: 'faculty', select: 'code name' }
+        }));
       }
+
+      if (inserted.length === 0) {
+        return res.status(400).json({
+          message: 'No valid courses inserted.',
+          insertedCount: 0,
+          skippedCount: skipped.length,
+          courses: [],
+          skipped,
+        });
+      }
+
       return res.status(201).json({
         message: 'Bulk course creation complete.',
         insertedCount: inserted.length,
@@ -59,10 +81,17 @@ courseRouter.post('/course', async (req, res) => {
     if (!valid) {
       return res.status(400).json({ error: errors.join(', ') });
     }
-    const { name, code, description, semester } = req.body;
-    const newCourse = new Course({ name, code, description, semester });
+    const { name, code, description, semesterOrYear, type } = req.body;
+    const exists = await Course.findOne({ code });
+    if (exists) {
+      return res.status(400).json({ error: 'Duplicate course code.' });
+    }
+    const newCourse = new Course({ name, code, description, semesterOrYear, type });
     await newCourse.save();
-    const populatedCourse = await Course.findById(newCourse._id).populate('semester');
+    const populatedCourse = await Course.findById(newCourse._id).populate({
+      path: 'semesterOrYear',
+      populate: { path: 'faculty', select: 'code name' }
+    });
     res.status(201).json({
       message: 'Course created successfully',
       course: populatedCourse,
@@ -74,38 +103,56 @@ courseRouter.post('/course', async (req, res) => {
   }
 });
 
-
-courseRouter.get('/course', async (req, res) => {
+// GET: all courses
+courseRouter.get('/course', authmiddleware, authorizedRole("admin"), async (req, res) => {
   try {
-    // Populate semester (only what you need)
-    const courses = await Course.find()
+    const { semesterOrYear, faculty, search, type } = req.query;
+    const query = {};
+    if (semesterOrYear) query.semesterOrYear = semesterOrYear;
+    if (type) query.type = type;
+    if (faculty) {
+      // Find all semesterOrYear of that faculty
+      const semesters = await SemesterOrYear.find({ faculty }).select("_id");
+      query.semesterOrYear = { $in: semesters.map(s => s._id) };
+    }
+    if (search) {
+      const regex = { $regex: search, $options: "i" };
+      query.$or = [
+        { name: regex },
+        { code: regex },
+        { description: regex },
+      ];
+    }
+    const courses = await Course.find(query)
       .populate({
-        path: 'semester',
-        select: 'semesterNumber faculty',
-        populate: { path: 'faculty', select: 'code' }
+        path: 'semesterOrYear',
+        select: 'name semesterNumber yearNumber faculty',
+        populate: { path: 'faculty', select: 'code name' }
       })
       .sort({ createdAt: -1 });
 
-    // Format each course
+    // Format for frontend/UI
     const formatted = courses.map(c => {
-      let semesterLabel = '';
-      if (c.semester) {
-        // Convert number to ordinal (1st, 2nd, 3rd, etc.)
-        const ordinals = ["", "1st", "2nd", "3rd", "4th", "5th", "6th", "7th", "8th"];
-        semesterLabel = `${ordinals[c.semester.semesterNumber] || c.semester.semesterNumber + 'th'} Semester ${c.semester.faculty?.code?.toUpperCase() || ''}`.trim();
+      let label = '';
+      if (c.semesterOrYear) {
+        const s = c.semesterOrYear;
+        const ordinal = s.semesterNumber
+          ? getOrdinal(s.semesterNumber) + " Semester"
+          : s.yearNumber
+            ? getOrdinal(s.yearNumber) + " Year"
+            : '';
+        label = `${ordinal} ${s.faculty?.code?.toUpperCase() || ''}`.trim();
       }
       return {
         _id: c._id,
         name: c.name,
         code: c.code,
-        semester: semesterLabel,
-        materials: c.materials,
-        assignments: c.assignments,
-        attendanceRecords: c.attendanceRecords,
-        grades: c.grades,
+        semesterOrYear: label,
+        description: c.description,
+        slug: c.slug,
+        type: c.type,
         createdAt: c.createdAt,
         updatedAt: c.updatedAt,
-        slug: c.slug
       };
     });
 
@@ -116,17 +163,17 @@ courseRouter.get('/course', async (req, res) => {
   }
 });
 
-
-// Get single course by ID
-courseRouter.get('/course/:id', async (req, res) => {
+// GET: single course by ID
+courseRouter.get('/course/:id', authmiddleware, authorizedRole("admin"), async (req, res) => {
   const { id } = req.params;
-
   if (!mongoose.Types.ObjectId.isValid(id)) {
     return res.status(400).json({ error: 'Invalid course ID.' });
   }
-
   try {
-    const course = await Course.findById(id).populate('semester');
+    const course = await Course.findById(id).populate({
+      path: 'semesterOrYear',
+      populate: { path: 'faculty', select: 'code name' }
+    });
     if (!course) {
       return res.status(404).json({ error: 'Course not found.' });
     }
@@ -137,40 +184,40 @@ courseRouter.get('/course/:id', async (req, res) => {
   }
 });
 
-// Update course partially
-courseRouter.patch('/course/:id', async (req, res) => {
+// PATCH: update course
+courseRouter.patch('/course/:id', authmiddleware, authorizedRole("admin"), async (req, res) => {
   const { id } = req.params;
-
   if (!mongoose.Types.ObjectId.isValid(id)) {
     return res.status(400).json({ error: 'Invalid course ID.' });
   }
-
   try {
     const course = await Course.findById(id);
     if (!course) {
       return res.status(404).json({ error: 'Course not found.' });
     }
-
-    // If semester is updated, validate it
-    if (req.body.semester && !mongoose.Types.ObjectId.isValid(req.body.semester)) {
-      return res.status(400).json({ error: 'Invalid semester ID.' });
-    }
-    if (req.body.semester) {
-      const semesterExists = await SemesterOrYear.findById(req.body.semester);
+    // Validate semesterOrYear if being changed
+    if (req.body.semesterOrYear) {
+      if (!mongoose.Types.ObjectId.isValid(req.body.semesterOrYear)) {
+        return res.status(400).json({ error: 'Invalid semesterOrYear ID.' });
+      }
+      const semesterExists = await SemesterOrYear.findById(req.body.semesterOrYear);
       if (!semesterExists) {
-        return res.status(400).json({ error: 'Semester not found.' });
+        return res.status(400).json({ error: 'SemesterOrYear not found.' });
       }
     }
-
+    // Validate type if provided
+    if (req.body.type && !["compulsory", "elective"].includes(req.body.type)) {
+      return res.status(400).json({ error: 'Invalid type. Must be compulsory or elective.' });
+    }
     // Update fields provided
     Object.keys(req.body).forEach(key => {
       course[key] = req.body[key];
     });
-
     await course.save();
-
-    const updatedCourse = await Course.findById(id).populate('semester');
-
+    const updatedCourse = await Course.findById(id).populate({
+      path: 'semesterOrYear',
+      populate: { path: 'faculty', select: 'code name' }
+    });
     res.json({ message: 'Course updated successfully', course: updatedCourse });
   } catch (error) {
     console.error('Error updating course:', error);
@@ -178,28 +225,26 @@ courseRouter.patch('/course/:id', async (req, res) => {
   }
 });
 
-// Delete course bu id
-courseRouter.delete('/course/:id', async (req, res) => {
+// DELETE: by ID
+courseRouter.delete('/course/:id', authmiddleware, authorizedRole("admin"), async (req, res) => {
   const { id } = req.params;
-
   if (!mongoose.Types.ObjectId.isValid(id)) {
     return res.status(400).json({ error: 'Invalid course ID.' });
   }
-
   try {
     const deletedCourse = await Course.findByIdAndDelete(id);
     if (!deletedCourse) {
       return res.status(404).json({ error: 'Course not found.' });
     }
-
     res.json({ message: 'Course deleted successfully', course: deletedCourse });
   } catch (error) {
     console.error('Error deleting course:', error);
     res.status(500).json({ error: 'Server error deleting course.' });
   }
 });
-// Delete all courses
-courseRouter.delete('/courses', async (req, res) => {
+
+// DELETE: all courses
+courseRouter.delete('/courses', authmiddleware, authorizedRole("admin"), async (req, res) => {
   try {
     const result = await Course.deleteMany({});
     res.json({ message: 'All courses deleted successfully', deletedCount: result.deletedCount });
@@ -208,5 +253,15 @@ courseRouter.delete('/courses', async (req, res) => {
     res.status(500).json({ error: 'Server error deleting all courses.' });
   }
 });
+
+// Helper: ordinal suffix
+function getOrdinal(n) {
+  if (typeof n !== "number") return "";
+  const j = n % 10, k = n % 100;
+  if (j === 1 && k !== 11) return n + "st";
+  if (j === 2 && k !== 12) return n + "nd";
+  if (j === 3 && k !== 13) return n + "rd";
+  return n + "th";
+}
 
 export default courseRouter;

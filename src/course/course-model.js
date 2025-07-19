@@ -13,8 +13,9 @@ const courseSchema = new mongoose.Schema({
   },
   description: {
     type: String,
+    trim: true,
   },
-  semester: {
+  semesterOrYear: { // use "semesterOrYear" for clarity!
     type: mongoose.Schema.Types.ObjectId,
     ref: 'SemesterOrYear',
     required: true,
@@ -24,37 +25,20 @@ const courseSchema = new mongoose.Schema({
     unique: true,
     index: true,
   },
-  materials: [{
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'Material',
-  }],
-  assignments: [{
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'Assignment',
-  }],
-  attendanceRecords: [{
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'Attendance',
-  }],
-  grades: [{
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'Grade',
-  }],
 }, { timestamps: true });
 
-// Generate slug from name and code before saving
 courseSchema.pre('save', function(next) {
   if (!this.slug && this.name && this.code) {
-    this.slug = `${this.code.toLowerCase()}-${this.name.toLowerCase().replace(/\s+/g, '-')}`;
+    this.slug = `${this.code.trim().toLowerCase()}-${this.name.trim().toLowerCase().replace(/\s+/g, '-')}`;
   }
   next();
 });
 
-// Post-save hook: add this course ID to the semester's courses array if not already there
+// Optionally auto-add to SemesterOrYear.courses (still fine)
 courseSchema.post('save', async function(doc, next) {
   try {
-    if (doc.semester) {
-      await mongoose.model('SemesterOrYear').findByIdAndUpdate(doc.semester, {
+    if (doc.semesterOrYear) {
+      await mongoose.model('SemesterOrYear').findByIdAndUpdate(doc.semesterOrYear, {
         $addToSet: { courses: doc._id },
       });
     }

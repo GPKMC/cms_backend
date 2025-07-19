@@ -10,6 +10,8 @@ import facultyRouter from './faculty/faculty_routes.js';
 import batchRouter from './batch/batch-routes.js';
 import semesterRouter from './semoryear/sem-year-routes.js';
 import courseRouter from './course/course-routes.js';
+import CourseInstancerouter from './course/course-instance.js';
+import routBatchPeriodRouter from './batch/batchPeriod-routes.js';
 
 
 
@@ -25,9 +27,12 @@ app.use('/userAuth', authRouter);
 app.use('/api/auth', googleAuthRouter); // <-- mount Google OAuth routes here
 app.use('/faculty-api', facultyRouter);
 app.use('/batch-api',batchRouter);
+app.use('/batch-api',routBatchPeriodRouter);
 app.use('/sem-api',semesterRouter);
 app.use ('/course-api',courseRouter);
+app.use ('/course-api',CourseInstancerouter);
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
   console.log(`Server running on port: ${PORT}`);
 });
+
