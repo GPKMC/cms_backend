@@ -5,10 +5,8 @@ const UserSchema = new mongoose.Schema({
 
   email: { type: String, required: true, unique: true, lowercase: true, trim: true },
 
-  // Password REQUIRED for all users
   password: { type: String, required: true },
 
-  // Google OAuth ID (optional, only used when user logs in via Google)
   googleId: { type: String, default: null },
 
   role: {
@@ -20,6 +18,16 @@ const UserSchema = new mongoose.Schema({
 
   isActive: { type: Boolean, default: true },
   isVerified: { type: Boolean, default: false },
+
+  // Add batch reference (only valid if role === "student")
+  batch: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "Batch",
+    required: function () {
+      // Required only if role is student
+      return this.role === "student";
+    },
+  },
 
 }, { timestamps: true });
 

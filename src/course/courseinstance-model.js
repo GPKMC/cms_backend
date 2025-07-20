@@ -35,6 +35,17 @@ const courseInstanceSchema = new mongoose.Schema({
     isActive: { type: Boolean, 
         // default: true 
     },
+    commentingDisabled: {
+      type: Boolean,
+      default: false, // 🔒 disables comments globally for this course
+    },
+
+    mutedStudents: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "User", // 🔇 student-level mute
+      },
+    ],
 }, { timestamps: true });
 
 // Enforce unique batch+course+teacher if needed (or just batch+course)
