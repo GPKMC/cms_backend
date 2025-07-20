@@ -1,3 +1,5 @@
+// models/course-model.js
+
 import mongoose from 'mongoose';
 
 const courseSchema = new mongoose.Schema({
@@ -15,10 +17,17 @@ const courseSchema = new mongoose.Schema({
     type: String,
     trim: true,
   },
-  semesterOrYear: { // use "semesterOrYear" for clarity!
+  semesterOrYear: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'SemesterOrYear',
     required: true,
+  },
+  type: {
+    type: String,
+    required: true,
+    enum: ['compulsory', 'elective'],
+    trim: true,
+    lowercase: true,
   },
   slug: {
     type: String,
@@ -34,7 +43,6 @@ courseSchema.pre('save', function(next) {
   next();
 });
 
-// Optionally auto-add to SemesterOrYear.courses (still fine)
 courseSchema.post('save', async function(doc, next) {
   try {
     if (doc.semesterOrYear) {
@@ -49,4 +57,5 @@ courseSchema.post('save', async function(doc, next) {
 });
 
 const Course = mongoose.model('Course', courseSchema);
+
 export default Course;
