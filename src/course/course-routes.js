@@ -30,25 +30,40 @@ async function validateCourse(course) {
   };
 }
 
-// POST: create (bulk or single)
 courseRouter.post('/course', authmiddleware, authorizedRole("admin"), async (req, res) => {
   try {
-    // Bulk insert
     if (Array.isArray(req.body)) {
       const inserted = [];
       const skipped = [];
+
       for (const item of req.body) {
-        const { valid, errors } = await validateCourse(item);
+        const { valid, errors, semesterExists } = await validateCourse(item);
         if (!valid) {
           skipped.push({ course: item, errors });
           continue;
         }
+
         const { name, code, description, semesterOrYear, type } = item;
-        const exists = await Course.findOne({ code });
-        if (exists) {
+
+        // Check duplicate code
+        const existsCode = await Course.findOne({ code });
+        if (existsCode) {
           skipped.push({ course: item, errors: ["Duplicate code"] });
           continue;
         }
+
+        // Check duplicate name for same faculty
+        const facultyId = semesterExists.faculty.toString();
+        const existsName = await Course.findOne({
+          name,
+          semesterOrYear: { $in: await SemesterOrYear.find({ faculty: facultyId }).distinct('_id') }
+        });
+
+        if (existsName) {
+          skipped.push({ course: item, errors: ["Duplicate name within same faculty"] });
+          continue;
+        }
+
         const newCourse = new Course({ name, code, description, semesterOrYear, type });
         await newCourse.save();
         inserted.push(await Course.findById(newCourse._id).populate({
@@ -77,15 +92,30 @@ courseRouter.post('/course', authmiddleware, authorizedRole("admin"), async (req
     }
 
     // Single insert
-    const { valid, errors } = await validateCourse(req.body);
+    const { valid, errors, semesterExists } = await validateCourse(req.body);
     if (!valid) {
       return res.status(400).json({ error: errors.join(', ') });
     }
+
     const { name, code, description, semesterOrYear, type } = req.body;
-    const exists = await Course.findOne({ code });
-    if (exists) {
+
+    // Check duplicate code
+    const existsCode = await Course.findOne({ code });
+    if (existsCode) {
       return res.status(400).json({ error: 'Duplicate course code.' });
     }
+
+    // Check duplicate name within faculty
+    const facultyId = semesterExists.faculty.toString();
+    const existsName = await Course.findOne({
+      name,
+      semesterOrYear: { $in: await SemesterOrYear.find({ faculty: facultyId }).distinct('_id') }
+    });
+
+    if (existsName) {
+      return res.status(400).json({ error: 'Duplicate course name within the same faculty.' });
+    }
+
     const newCourse = new Course({ name, code, description, semesterOrYear, type });
     await newCourse.save();
     const populatedCourse = await Course.findById(newCourse._id).populate({
@@ -96,13 +126,11 @@ courseRouter.post('/course', authmiddleware, authorizedRole("admin"), async (req
       message: 'Course created successfully',
       course: populatedCourse,
     });
-
   } catch (error) {
     console.error('Error creating course:', error);
     res.status(500).json({ error: 'Server error creating course.' });
   }
 });
-
 // GET: all courses
 courseRouter.get('/course', authmiddleware, authorizedRole("admin"), async (req, res) => {
   try {
@@ -263,5 +291,82 @@ function getOrdinal(n) {
   if (j === 3 && k !== 13) return n + "rd";
   return n + "th";
 }
+
+courseRouter.get('/coursecode', authmiddleware, authorizedRole("admin"), async (req, res) => {
+  try {
+    const { semesterOrYear, faculty, search, type } = req.query;
+    const query = {};
+
+    if (faculty) {
+      // Find all semesterOrYear of that faculty
+      const semesters = await SemesterOrYear.find({ faculty }).select("_id");
+      const semesterIds = semesters.map(s => s._id.toString());
+
+      if (semesterOrYear) {
+        // Only include semesterOrYear if it belongs to the faculty's semesters
+        if (semesterIds.includes(semesterOrYear.toString())) {
+          query.semesterOrYear = semesterOrYear;
+        } else {
+          // If semesterOrYear is invalid for faculty, return empty
+          return res.json({ courses: [] });
+        }
+      } else {
+        query.semesterOrYear = { $in: semesterIds };
+      }
+    } else if (semesterOrYear) {
+      query.semesterOrYear = semesterOrYear;
+    }
+
+    if (type) {
+      query.type = type;
+    }
+
+    if (search) {
+      const regex = { $regex: search, $options: "i" };
+      query.$or = [
+        { name: regex },
+        { code: regex },
+        { description: regex },
+      ];
+    }
+
+    const courses = await Course.find(query)
+      .populate({
+        path: 'semesterOrYear',
+        select: 'name semesterNumber yearNumber faculty',
+        populate: { path: 'faculty', select: 'code name' }
+      })
+      .sort({ createdAt: -1 });
+
+    const formatted = courses.map(c => {
+      let label = '';
+      if (c.semesterOrYear) {
+        const s = c.semesterOrYear;
+        const ordinal = s.semesterNumber
+          ? getOrdinal(s.semesterNumber) + " Semester"
+          : s.yearNumber
+            ? getOrdinal(s.yearNumber) + " Year"
+            : '';
+        label = `${ordinal} ${s.faculty?.code?.toUpperCase() || ''}`.trim();
+      }
+      return {
+        _id: c._id,
+        name: c.name,
+        code: c.code,
+        semesterOrYear: label,
+        description: c.description,
+        slug: c.slug,
+        type: c.type,
+        createdAt: c.createdAt,
+        updatedAt: c.updatedAt,
+      };
+    });
+
+    res.json({ courses: formatted });
+  } catch (error) {
+    console.error('Error fetching courses:', error);
+    res.status(500).json({ error: 'Server error fetching courses.' });
+  }
+});
 
 export default courseRouter;

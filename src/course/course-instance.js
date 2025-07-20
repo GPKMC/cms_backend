@@ -101,27 +101,55 @@ CourseInstancerouter.get('/courseInstance', authmiddleware, authorizedRole("admi
 });
 
 // GET single
-CourseInstancerouter.get('/courseInstance/:id', authmiddleware, authorizedRole("admin"), async (req, res) => {
-  if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
-    return res.status(400).json({ error: 'Invalid ID' });
+CourseInstancerouter.get(
+  "/courseInstance/:id",
+  authmiddleware,
+  authorizedRole("admin", "teacher"),
+  async (req, res) => {
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+      return res.status(400).json({ error: "Invalid ID" });
+    }
+
+    try {
+      const instance = await CourseInstance.findById(req.params.id)
+        .populate("batch")
+        .populate({
+          path: "course",
+          populate: {
+            path: "semesterOrYear",
+            populate: { path: "faculty", select: "name code" },
+          },
+        })
+        .populate({ path: "teacher", select: "_id username email role" });
+
+      if (!instance) return res.status(404).json({ error: "Not found" });
+
+      const batchId = instance.batch?._id;
+      let students = [];
+      let studentCount = 0;
+
+      if (batchId) {
+        students = await User.find({ batch: batchId, role: "student" }).select(
+          "_id username email"
+        );
+        studentCount = students.length;
+      }
+
+      res.json({
+        instance: {
+          ...instance.toObject(),
+          studentCount,
+          students, // ✅ include all students from the batch
+        },
+      });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
   }
-  try {
-    const instance = await CourseInstance.findById(req.params.id)
-      .populate('batch')
-      .populate({
-        path: 'course',
-        populate: {
-          path: 'semesterOrYear',
-          populate: { path: 'faculty', select: 'name code' }
-        }
-      })
-      .populate({ path: 'teacher', select: 'name email role' });
-    if (!instance) return res.status(404).json({ error: 'Not found' });
-    res.json({ instance });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
+);
+
+
+
 
 // UPDATE (PATCH)
 CourseInstancerouter.patch('/courseInstance/:id', authmiddleware, authorizedRole("admin"), async (req, res) => {
