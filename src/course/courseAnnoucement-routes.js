@@ -2,34 +2,48 @@ import express from "express";
 import mongoose from "mongoose";
 import courseAnnouncement from "./courseAnnouncement.js";
 import { authmiddleware, authorizedRole } from "../users/user-middleware.js";
+import multer from "multer";
+const upload = multer();
+const CourseAnnouncementrouter = express.Router();
 
-const CourseAnnouncementrouter=express.Router();
 
-// ✅ Create new announcement
+// ...your route
 CourseAnnouncementrouter.post(
-  "/",
+  "/course-announcement",
+  upload.any(),  // <-- this parses FormData!
   authmiddleware,
-  authorizedRole("teacher"),
+  authorizedRole("teacher", "student"),
   async (req, res) => {
     try {
+      // FormData fields are now in req.body, files in req.files
       const {
         content,
         courseInstance,
-        attachments = [],
-        links = [],
         commentsDisabled = false,
         mutedStudents = [],
+        visibleTo = [],
       } = req.body;
 
-      const announcement = await courseAnnouncement.create({
+      // attachments can come from req.files:
+      const attachments = req.files?.map((file) => file.originalname); // Or handle file saving as needed
+
+      let announcementData = {
         content,
         postedBy: req.user._id,
         courseInstance,
         attachments,
-        links,
+        links: JSON.parse(req.body.links || "[]"),
         commentsDisabled,
         mutedStudents,
-      });
+      };
+
+      if (req.user.role === "teacher") {
+        announcementData.visibleTo = JSON.parse(req.body.visibleTo || "[]");
+      } else {
+        announcementData.visibleTo = [];
+      }
+
+      const announcement = await courseAnnouncement.create(announcementData);
 
       res.status(201).json({ announcement });
     } catch (err) {
@@ -38,6 +52,7 @@ CourseAnnouncementrouter.post(
   }
 );
 
+
 // ✅ Get single announcement by ID
 CourseAnnouncementrouter.get("/:id", authmiddleware, async (req, res) => {
   try {
@@ -45,6 +60,14 @@ CourseAnnouncementrouter.get("/:id", authmiddleware, async (req, res) => {
       .populate("postedBy", "username email role");
 
     if (!announcement) return res.status(404).json({ error: "Not found" });
+
+    // 👇 Visibility check for students
+    if (req.user.role === "student" &&
+        Array.isArray(announcement.visibleTo) &&
+        announcement.visibleTo.length > 0 &&
+        !announcement.visibleTo.some(id => id.equals(req.user._id))) {
+      return res.status(403).json({ error: "Not allowed to view this announcement" });
+    }
 
     res.json({ announcement });
   } catch (err) {
@@ -59,9 +82,21 @@ CourseAnnouncementrouter.get("/course/:courseInstanceId", authmiddleware, async 
       return res.status(400).json({ error: "Invalid CourseInstance ID" });
     }
 
-    const announcements = await courseAnnouncement.find({
-      courseInstance: req.params.courseInstanceId,
-    })
+    let announcementsQuery = { courseInstance: req.params.courseInstanceId };
+
+    // Students only see announcements visible to them, or public ones
+    if (req.user.role === "student") {
+      announcementsQuery = {
+        ...announcementsQuery,
+        $or: [
+          { visibleTo: { $exists: false } },
+          { visibleTo: { $size: 0 } },
+          { visibleTo: req.user._id }
+        ]
+      };
+    }
+
+    const announcements = await courseAnnouncement.find(announcementsQuery)
       .sort({ createdAt: -1 })
       .populate("postedBy", "username email");
 
@@ -84,9 +119,19 @@ CourseAnnouncementrouter.put(
         return res.status(403).json({ error: "You can only edit your own announcements" });
       }
 
+      // Only allow certain fields to be updated (optionally)
+      const updateFields = {
+        content: req.body.content,
+        attachments: req.body.attachments,
+        links: req.body.links,
+        commentsDisabled: req.body.commentsDisabled,
+        mutedStudents: req.body.mutedStudents,
+        visibleTo: req.body.visibleTo, // <<<<< allow update
+      };
+
       const updated = await courseAnnouncement.findByIdAndUpdate(
         req.params.id,
-        req.body,
+        updateFields,
         { new: true }
       );
 
@@ -96,7 +141,6 @@ CourseAnnouncementrouter.put(
     }
   }
 );
-
 
 // ✅ Delete an announcement
 CourseAnnouncementrouter.delete(

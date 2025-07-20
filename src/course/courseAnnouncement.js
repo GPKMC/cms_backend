@@ -2,10 +2,7 @@ import mongoose from "mongoose";
 
 const courseAnnouncementSchema = new mongoose.Schema(
   {
-    content: {
-      type: String,
-      required: true,
-    },
+    content: { type: String, required: true },
     postedBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
@@ -16,25 +13,15 @@ const courseAnnouncementSchema = new mongoose.Schema(
       ref: "CourseInstance",
       required: true,
     },
-    attachments: [
-      {
-        type: String,
-      },
-    ],
-    links: [
-      {
-        type: String,
-      },
-    ],
-    commentsDisabled: {
-      type: Boolean,
-      default: false,
-    },
+    attachments: [{ type: String }],
+    links: [{ type: String }],
+    commentsDisabled: { type: Boolean, default: false },
     mutedStudents: [
-      {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: "User",
-      },
+      { type: mongoose.Schema.Types.ObjectId, ref: "User" }
+    ],
+    // 👇 New field for visibility
+    visibleTo: [
+      { type: mongoose.Schema.Types.ObjectId, ref: "User" }
     ],
   },
   { timestamps: true }
