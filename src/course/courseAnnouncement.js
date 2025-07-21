@@ -1,31 +1,20 @@
 import mongoose from "mongoose";
+const { Schema } = mongoose;
 
-const courseAnnouncementSchema = new mongoose.Schema(
+const courseAnnouncementSchema = new Schema(
   {
     content: { type: String, required: true },
-    postedBy: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "User",
-      required: true,
-    },
-    courseInstance: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "CourseInstance",
-      required: true,
-    },
-    attachments: [{ type: String }],
-    links: [{ type: String }],
+    postedBy: { type: Schema.Types.ObjectId, ref: "User", required: true },
+    courseInstance: { type: Schema.Types.ObjectId, ref: "CourseInstance", required: true },
+    images: [String],
+    documents: [String],
+    links: [String],
+    youtubeLinks: [String],
     commentsDisabled: { type: Boolean, default: false },
-    mutedStudents: [
-      { type: mongoose.Schema.Types.ObjectId, ref: "User" }
-    ],
-    // 👇 New field for visibility
-    visibleTo: [
-      { type: mongoose.Schema.Types.ObjectId, ref: "User" }
-    ],
+    mutedStudents: [{ type: Schema.Types.ObjectId, ref: "User" }],
+    visibleTo: [{ type: Schema.Types.ObjectId, ref: "User" }],
   },
   { timestamps: true }
 );
 
-export default mongoose.models.CourseAnnouncement ||
-  mongoose.model("CourseAnnouncement", courseAnnouncementSchema);
+export default mongoose.model("CourseAnnouncement", courseAnnouncementSchema);
