@@ -1,0 +1,5 @@
+username,email,password,role,faculty,batch
+"john doe","john.1@gpkmc.edu.np","Password@123","student","Bachelor of Computer Application","BCA_2029"
+"jane smith","jane.2@gpkmc.edu.np","Password@123","student","Bachelor of Computer Application","BCA_2027"
+"teachermike","teachermike@gpkmc.edu.np","Password@123","teacher","",""
+"adminjane","adminjane@gpkmc.edu.np","Password@123","admin","",""
