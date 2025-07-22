@@ -1,6 +1,6 @@
 import express from "express";
 import mongoose from "mongoose";
-import CourseAnnouncement from "./courseAnnouncement.js";
+import CourseAnnouncement from "./courseAnnouncement-model.js";
 import { authmiddleware, authorizedRole } from "../users/user-middleware.js";
 import upload from "../utlis/multer-config.js";
 
