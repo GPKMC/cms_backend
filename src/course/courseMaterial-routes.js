@@ -53,38 +53,10 @@ CourseMaterialRouter.post(
 );
 
 // GET ALL materials for a courseInstance
-CourseMaterialRouter.get(
-  "/course/:courseInstanceId",
-  authmiddleware,
-  authorizedRole("teacher", "student"),
-  async (req, res) => {
-    try {
-      if (!mongoose.Types.ObjectId.isValid(req.params.courseInstanceId))
-        return res.status(400).json({ error: "Invalid CourseInstance ID" });
-      let q = { courseInstance: req.params.courseInstanceId };
-      if (req.user.role === "student") {
-        q = {
-          ...q,
-          $or: [
-            { visibleTo: { $exists: false } },
-            { visibleTo: { $size: 0 } },
-            { visibleTo: req.user._id },
-          ]
-        };
-      }
-      const materials = await CourseMaterial.find(q)
-        .sort({ createdAt: -1 })
-        .populate("postedBy", "username email")
-        .lean();
-      res.json({ materials });
-    } catch (err) {
-      res.status(500).json({ error: err.message });
-    }
-  }
-);
+
 
 // GET SINGLE material by ID
-CourseMaterialRouter.get("/:id",
+CourseMaterialRouter.get("/materials/:id",
   authmiddleware,
   authorizedRole("teacher", "student"),
   async (req, res) => {
