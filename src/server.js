@@ -14,6 +14,7 @@ import CourseInstancerouter from './course/course-instance.js';
 import routBatchPeriodRouter from './batch/batchPeriod-routes.js';
 import teacherRouter from './teacherRoutes/teacher-routes.js';
 import CourseAnnouncementrouter from './course/courseAnnoucement-routes.js';
+import CourseMaterialRouter from './course/courseMaterial-routes.js';
 
 
 
@@ -39,6 +40,7 @@ app.use ('/course-api',courseRouter);
 app.use ('/course-api',CourseInstancerouter);
 app.use ('/teacher-routes',teacherRouter)
 app.use ('/announcement-routes', CourseAnnouncementrouter);
+app.use('/course-materials', CourseMaterialRouter);
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
   console.log(`Server running on port: ${PORT}`);
