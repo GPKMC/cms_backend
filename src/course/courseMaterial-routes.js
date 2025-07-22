@@ -56,7 +56,7 @@ CourseMaterialRouter.post(
 
 
 // GET SINGLE material by ID
-CourseMaterialRouter.get("/materials/:id",
+CourseMaterialRouter.get("/material/:id",
   authmiddleware,
   authorizedRole("teacher", "student"),
   async (req, res) => {
