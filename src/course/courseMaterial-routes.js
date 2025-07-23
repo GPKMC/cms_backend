@@ -154,7 +154,9 @@ CourseMaterialRouter.patch("/:id",
 
       if (req.body.title) material.title = req.body.title;
       if (req.body.content) material.content = req.body.content;
-      if (req.body.topic) material.topic = req.body.topic;
+if (req.body.topic !== undefined) {
+  material.topic = req.body.topic === "" ? undefined : req.body.topic;
+}
 
       if (req.body.links) material.links = JSON.parse(req.body.links);
       if (req.body.youtubeLinks) material.youtubeLinks = JSON.parse(req.body.youtubeLinks);
