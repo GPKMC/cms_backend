@@ -24,6 +24,14 @@ const courseInstanceSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Assignment',
   }],
+  questions: [{
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Question',
+  }],
+  quiz: [{
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Quiz',  
+  }],
   attendanceRecords: [{
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Attendance',

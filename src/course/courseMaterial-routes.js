@@ -9,10 +9,15 @@ const CourseMaterialRouter = express.Router();
 // Helper to generate file URLs
 function makeFileUrls(files) {
   if (!Array.isArray(files)) return [];
-  return files.map(file =>
-    "/" + file.path.replace(process.cwd(), "").replace(/\\/g, "/")
-  );
+  return files.map(file => {
+    // Remove absolute project path
+    let relative = file.path.replace(process.cwd(), "");
+    // Make sure it starts with exactly one "/"
+    relative = relative.replace(/\\/g, "/").replace(/^\/+/, "/");
+    return relative;
+  });
 }
+
 
 // CREATE: POST /course-material
 CourseMaterialRouter.post(
@@ -52,10 +57,9 @@ CourseMaterialRouter.post(
   }
 );
 
-// GET ALL materials for a courseInstance
+// routes/courseMaterials.js
+// routes/courseMaterials.js
 
-
-// GET SINGLE material by ID
 CourseMaterialRouter.get("/material/:id",
   authmiddleware,
   authorizedRole("teacher", "student"),
@@ -80,6 +84,37 @@ CourseMaterialRouter.get("/material/:id",
     }
   }
 );
+
+CourseMaterialRouter.get("/course/:courseInstanceId",
+  authmiddleware,
+  authorizedRole("teacher", "student"),
+  async (req, res) => {
+    try {
+      if (!mongoose.Types.ObjectId.isValid(req.params.courseInstanceId))
+        return res.status(400).json({ error: "Invalid CourseInstance ID" });
+      let q = { courseInstance: req.params.courseInstanceId };
+      if (req.user.role === "student") {
+        q = {
+          ...q,
+          $or: [
+            { visibleTo: { $exists: false } },
+            { visibleTo: { $size: 0 } },
+            { visibleTo: req.user._id },
+          ]
+        };
+      }
+      const materials = await CourseMaterial.find(q)
+        .sort({ createdAt: -1 })
+        .populate("postedBy", "username email")
+        .lean();
+      res.json({ materials });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  }
+);
+
+
 
 // DELETE: Only poster can delete
 CourseMaterialRouter.delete("/:id",
@@ -119,7 +154,9 @@ CourseMaterialRouter.patch("/:id",
 
       if (req.body.title) material.title = req.body.title;
       if (req.body.content) material.content = req.body.content;
-      if (req.body.topic) material.topic = req.body.topic;
+if (req.body.topic !== undefined) {
+  material.topic = req.body.topic === "" ? undefined : req.body.topic;
+}
 
       if (req.body.links) material.links = JSON.parse(req.body.links);
       if (req.body.youtubeLinks) material.youtubeLinks = JSON.parse(req.body.youtubeLinks);
