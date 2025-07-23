@@ -225,5 +225,16 @@ CourseInstancerouter.delete('/courseInstance/:id', authmiddleware, authorizedRol
     res.status(500).json({ error: err.message });
   }
 });
+//get students in a course instance
+CourseInstancerouter.get("/course-instance/:id/students", async (req, res) => {
+  const { id } = req.params;
+  const instance = await CourseInstance.findById(id);
+  if (!instance) return res.status(404).json({ error: "Not found" });
 
+  const students = await User.find({
+    batch: instance.batch,
+    role: "student"
+  }).select("username email _id");
+  res.json(students);
+});
 export default CourseInstancerouter;
