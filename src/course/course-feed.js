@@ -4,72 +4,66 @@ import { authmiddleware, authorizedRole } from "../users/user-middleware.js";
 import topicModel from "./topic-model.js";
 import assignmentModel from "../assignment/assignmentModel.js";
 import courseMaterialsModel from "./courseMaterials-model.js";
+import questionModel from "../question/question-model.js";
 
 const FeedRouter = express.Router();
 
 FeedRouter.get(
-  "/:courseInstanceId",                   // <-- CORRECT route!
+  "/:courseInstanceId",
   authmiddleware,
-  authorizedRole('teacher', 'student'),               // <-- fix role typo and allow student if needed
+  authorizedRole('teacher', 'student'),
   async (req, res) => {
     const { courseInstanceId } = req.params;
     if (!mongoose.Types.ObjectId.isValid(courseInstanceId))
       return res.status(400).json({ error: "Invalid courseInstanceId" });
 
     try {
-      // 1. Fetch topics for the courseInstance
       const topics = await topicModel.find({ courseInstance: courseInstanceId }).lean();
 
-      // 2. Fetch all materials and assignments for the courseInstance
-    //   const [materials, assignments] = await Promise.all([
-    //     courseMaterialsModel.find({ courseInstance: courseInstanceId })
-    //       .populate("postedBy","username email")
-    //       .lean(),
-    //     assignmentModel.find({ courseInstance: courseInstanceId })
-    //       .populate("postedBy", "username email")
-    //       .lean(),
-    //   ]);
-    const [materials, assignments] = await Promise.all([
-  courseMaterialsModel.find({ courseInstance: courseInstanceId })
-    .populate("postedBy", "username email")
-    .populate("visibleTo", "username email")
-    .lean(),
-  assignmentModel.find({ courseInstance: courseInstanceId })
-    .populate("postedBy", "username email")
-    .populate("visibleTo", "username email")
-    .lean(),
-]);
+      const [materials, assignments, questions] = await Promise.all([
+        courseMaterialsModel.find({ courseInstance: courseInstanceId })
+          .populate("postedBy", "username email")
+          .populate("visibleTo", "username email")
+          .lean(),
+        assignmentModel.find({ courseInstance: courseInstanceId })
+          .populate("postedBy", "username email")
+          .populate("visibleTo", "username email")
+          .lean(),
+        questionModel.find({ courseInstance: courseInstanceId })
+          .populate("postedBy", "username email")
+          .populate("visibleTo", "username email")
+          .lean(),
+      ]);
 
-
-      // 3. Group by topic
+      // Build topicMap with questions
       const topicMap = {};
       topics.forEach(topic => {
         topicMap[topic._id.toString()] = {
           topic,
           materials: [],
           assignments: [],
+          questions: []
         };
       });
 
-      // Handle Uncategorized (no topic)
       const uncategorized = {
         topic: { _id: null, title: "No topic" },
         materials: [],
         assignments: [],
+        questions: []
       };
 
-      // Group materials
+      // Materials
       materials.forEach(mat => {
         if (mat.topic) {
           const t = topicMap[mat.topic?.toString()];
           if (t) t.materials.push(mat);
-          else uncategorized.materials.push(mat); // topic was deleted maybe
+          else uncategorized.materials.push(mat);
         } else {
           uncategorized.materials.push(mat);
         }
       });
-
-      // Group assignments
+      // Assignments
       assignments.forEach(assign => {
         if (assign.topic) {
           const t = topicMap[assign.topic?.toString()];
@@ -79,18 +73,30 @@ FeedRouter.get(
           uncategorized.assignments.push(assign);
         }
       });
+      // Questions
+      questions.forEach(q => {
+        if (q.topic) {
+          const t = topicMap[q.topic?.toString()];
+          if (t) t.questions.push(q);
+          else uncategorized.questions.push(q);
+        } else {
+          uncategorized.questions.push(q);
+        }
+      });
 
-      // Sort items within each topic (optional, newest first)
+      // Sort everything (optional)
       Object.values(topicMap).forEach(group => {
         group.materials.sort((a, b) => new Date(b.updatedAt || b.createdAt) - new Date(a.updatedAt || a.createdAt));
         group.assignments.sort((a, b) => new Date(b.updatedAt || b.createdAt) - new Date(a.updatedAt || a.createdAt));
+        group.questions.sort((a, b) => new Date(b.updatedAt || b.createdAt) - new Date(a.updatedAt || a.createdAt));
       });
       uncategorized.materials.sort((a, b) => new Date(b.updatedAt || b.createdAt) - new Date(a.updatedAt || a.createdAt));
       uncategorized.assignments.sort((a, b) => new Date(b.updatedAt || b.createdAt) - new Date(a.updatedAt || a.createdAt));
+      uncategorized.questions.sort((a, b) => new Date(b.updatedAt || b.createdAt) - new Date(a.updatedAt || a.createdAt));
 
-      // Combine groups for output
+      // Output
       let result = Object.values(topicMap);
-      if (uncategorized.materials.length || uncategorized.assignments.length)
+      if (uncategorized.materials.length || uncategorized.assignments.length || uncategorized.questions.length)
         result = [...result, uncategorized];
 
       res.json(result);

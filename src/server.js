@@ -18,6 +18,7 @@ import CourseMaterialRouter from './course/courseMaterial-routes.js';
 import TopicRouter from './course/topic-routes.js';
 import AssignmentRouter from './assignment/assignment-router.js';
 import FeedRouter from './course/course-feed.js';
+import QuestionRouter from './question/question-routes.js';
 
 
 
@@ -46,6 +47,7 @@ app.use ('/announcement-routes', CourseAnnouncementrouter);
 app.use('/course-materials', CourseMaterialRouter);
 app.use ('/topic-api',TopicRouter);
 app.use('/assignment', AssignmentRouter);
+app.use('/question', QuestionRouter);
 app.use('/Coursefeeds', FeedRouter);
 
 const PORT = process.env.PORT || 5000;

@@ -8,8 +8,14 @@ const courseMaterialSchema = new Schema(
     postedBy: { type: Schema.Types.ObjectId, ref: "User", required: true },
     courseInstance: { type: Schema.Types.ObjectId, ref: "CourseInstance", required: true },
     topic: { type: Schema.Types.ObjectId, ref: "Topic"},
-    media: [String],          // Stores both image & video URLs
-    documents: [String],      // pdf, ppt, doc, etc.
+   documents: [{
+  url: String,
+  originalname: String,
+}],
+media: [{
+  url: String,
+  originalname: String,
+}],   
     links: [String],          // Any external links
     youtubeLinks: [String],   // For YouTube embeds
     commentsDisabled: { type: Boolean, default: false },

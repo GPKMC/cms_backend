@@ -10,11 +10,12 @@ const CourseMaterialRouter = express.Router();
 function makeFileUrls(files) {
   if (!Array.isArray(files)) return [];
   return files.map(file => {
-    // Remove absolute project path
     let relative = file.path.replace(process.cwd(), "");
-    // Make sure it starts with exactly one "/"
     relative = relative.replace(/\\/g, "/").replace(/^\/+/, "/");
-    return relative;
+    return {
+      url: relative,
+      originalname: file.originalname,
+    };
   });
 }
 
@@ -154,9 +155,7 @@ CourseMaterialRouter.patch("/:id",
 
       if (req.body.title) material.title = req.body.title;
       if (req.body.content) material.content = req.body.content;
-if (req.body.topic !== undefined) {
-  material.topic = req.body.topic === "" ? undefined : req.body.topic;
-}
+      if (req.body.topic) material.topic = req.body.topic;
 
       if (req.body.links) material.links = JSON.parse(req.body.links);
       if (req.body.youtubeLinks) material.youtubeLinks = JSON.parse(req.body.youtubeLinks);

@@ -2,16 +2,22 @@ import express from "express";
 import { authmiddleware, authorizedRole } from "../users/user-middleware.js";
 import upload from "../utlis/multer-config.js";
 import Assignment from "./assignmentModel.js";
-import mongoose from "mongoose";
+
 const AssignmentRouter = express.Router();
 
 // Helper to generate file URLs
 function makeFileUrls(files) {
   if (!Array.isArray(files)) return [];
-  return files.map(file =>
-    "/" + file.path.replace(process.cwd(), "").replace(/\\/g, "/")
-  );
+  return files.map(file => {
+    let relative = file.path.replace(process.cwd(), "");
+    relative = relative.replace(/\\/g, "/").replace(/^\/+/, "/");
+    return {
+      url: relative,
+      originalname: file.originalname,
+    };
+  });
 }
+
 
 // CREATE: POST /assignment
 AssignmentRouter.post(
@@ -24,13 +30,6 @@ AssignmentRouter.post(
   authorizedRole("teacher"),
   async (req, res) => {
     try {
-      if (req.body.dueDate) {
-        const now = new Date();
-        const dueDate = new Date(req.body.dueDate);
-        if (dueDate < now) {
-          return res.status(400).json({ error: "Due date/time cannot be in the past." });
-        }
-      }
       const mediaFiles = req.files?.media || [];
       const documentFiles = req.files?.documents || [];
 
@@ -90,23 +89,16 @@ AssignmentRouter.get(
   }
 );
 
-// GET SINGLE assignment by ID 
-
+// GET SINGLE assignment by ID
 AssignmentRouter.get(
   "/:id",
   authmiddleware,
   authorizedRole("teacher", "student"),
   async (req, res) => {
     try {
-      // Validate ObjectId
-      if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
-        return res.status(400).json({ error: "Invalid assignment id" });
-      }
-
-      const assignment = await Assignment.findById(req.params.id)
+      const assignment = await assignment_model.findById(req.params.id)
         .populate("postedBy", "username email role")
         .lean();
-
       if (!assignment) return res.status(404).json({ error: "Not found" });
 
       if (
@@ -123,7 +115,6 @@ AssignmentRouter.get(
     }
   }
 );
-
 
 // DELETE: Only poster can delete
 AssignmentRouter.delete(
@@ -162,26 +153,10 @@ AssignmentRouter.patch(
       // Only posted teacher can update
       if (!assignment.postedBy.equals(req.user._id))
         return res.status(403).json({ error: "You are not allowed to update this assignment" });
-      if (req.body.dueDate) {
-        const now = new Date();
-        const dueDate = new Date(req.body.dueDate);
-        if (dueDate < now) {
-          return res.status(400).json({ error: "Due date/time cannot be in the past." });
-        }
-        assignment.dueDate = req.body.dueDate;
-      }
+
       if (req.body.title) assignment.title = req.body.title;
       if (req.body.content) assignment.content = req.body.content;
-      if ("topic" in req.body) {
-        if (req.body.topic === "" || req.body.topic === null || req.body.topic === "null") {
-          assignment.topic = undefined;
-        } else {
-          assignment.topic = req.body.topic;
-        }
-
-      }
-
-
+      if (req.body.topic) assignment.topic = req.body.topic;
       if (req.body.dueDate) assignment.dueDate = req.body.dueDate;
       if (req.body.points) assignment.points = req.body.points;
 
@@ -214,7 +189,6 @@ AssignmentRouter.patch(
         assignment.visibleTo = JSON.parse(req.body.visibleTo);
 
       await assignment.save();
-
       res.status(201).json({ assignment: assignment.toObject() });
     } catch (err) {
       res.status(500).json({ error: err.message });

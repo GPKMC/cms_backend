@@ -106,7 +106,8 @@ function getRootFolder(req) {
   if (req.baseUrl.includes("materials")) return "course-materials";
   if (req.baseUrl.includes("announcement")) return "announcements";
   if (req.baseUrl.includes("assignment")) return "assignments";
-  return "uploads"; // fallback
+  if (req.baseUrl.includes("question")) return "questions";
+  return ""; // fallback
 }
 
 const storage = multer.diskStorage({

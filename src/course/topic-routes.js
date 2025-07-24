@@ -2,8 +2,6 @@ import express from "express";
 import mongoose from "mongoose";
 import { authmiddleware, authorizedRole } from "../users/user-middleware.js";
 import topicModel from "./topic-model.js";
-import courseMaterialsModel from "./courseMaterials-model.js";
-import assignmentModel from "../assignment/assignmentModel.js";
 
 const TopicRouter = express.Router();
 
@@ -75,35 +73,18 @@ TopicRouter.patch(
 
 // DELETE topic - Only by creator teacher
 TopicRouter.delete(
-  "/topic/:id",
+  "topic/:id",
   authmiddleware,
   authorizedRole("teacher"),
   async (req, res) => {
     try {
-      // 1. Find the topic
       const topic = await topicModel.findById(req.params.id);
       if (!topic) return res.status(404).json({ error: "Topic not found" });
-
-      // 2. Optional: Only the teacher who created the topic can delete
       if (!topic.createdBy.equals(req.user._id))
         return res.status(403).json({ error: "Only the teacher who created this topic can delete it" });
 
-      // 3. Set topic: null for all materials in this courseInstance with this topic
-      await courseMaterialsModel.updateMany(
-        { courseInstance: topic.courseInstance, topic: topic._id },
-        { $set: { topic: null } }
-      );
-
-      // 4. Set topic: null for all assignments in this courseInstance with this topic
-      await assignmentModel.updateMany(
-        { courseInstance: topic.courseInstance, topic: topic._id },
-        { $set: { topic: null } }
-      );
-
-      // 5. Delete the topic itself
       await topic.deleteOne();
-
-      res.json({ message: "Topic deleted. All materials and assignments have been set to 'no topic'." });
+      res.json({ message: "Topic deleted" });
     } catch (err) {
       res.status(500).json({ error: err.message });
     }

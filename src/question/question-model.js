@@ -1,7 +1,7 @@
 import mongoose from 'mongoose';
 const { Schema } = mongoose;
 
-const assignmentSchema = new Schema({
+const QuestionSchema = new Schema({
   title: { type: String, required: true },
   content: { type: String, required: true },
   postedBy: { type: Schema.Types.ObjectId, ref: "User", required: true }, // Teacher
@@ -14,7 +14,7 @@ const assignmentSchema = new Schema({
 media: [{
   url: String,
   originalname: String,
-}],   
+}],    
   links: [String],          // Any external links
   youtubeLinks: [String],   // YouTube embed links
   commentsDisabled: { type: Boolean, default: false },
@@ -26,9 +26,10 @@ media: [{
   updatedAt: { type: Date, default: Date.now }
 });
 
-assignmentSchema.pre('save', function (next) {
+// --- Correct pre-save hook ---
+QuestionSchema.pre('save', function (next) {
   this.updatedAt = Date.now();
   next();
 });
 
-export default mongoose.model('Assignment', assignmentSchema);
+export default mongoose.models.QuestionModel || mongoose.model('QuestionModel', QuestionSchema);
