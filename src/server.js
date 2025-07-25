@@ -19,6 +19,7 @@ import TopicRouter from './course/topic-routes.js';
 import AssignmentRouter from './assignment/assignment-router.js';
 import FeedRouter from './course/course-feed.js';
 import QuestionRouter from './question/question-routes.js';
+import GroupAssignmentRouter from './assignment/groupAssignments-routes.js';
 
 
 
@@ -49,6 +50,8 @@ app.use ('/topic-api',TopicRouter);
 app.use('/assignment', AssignmentRouter);
 app.use('/question', QuestionRouter);
 app.use('/Coursefeeds', FeedRouter);
+app.use('/group-assignment',GroupAssignmentRouter );
+
 
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
