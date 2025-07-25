@@ -33,7 +33,8 @@ app.use(
   "/uploads",
   express.static(path.join(process.cwd(), "uploads"))
 );
-
+app.use(express.json({ limit: "20mb" }));
+app.use(express.urlencoded({ limit: "20mb", extended: true }));
 app.use('/user-api', userRouter);
 app.use('/userAuth', authRouter);
 app.use('/api/auth', googleAuthRouter); // <-- mount Google OAuth routes here

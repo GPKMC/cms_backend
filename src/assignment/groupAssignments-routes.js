@@ -1,287 +1,297 @@
+// src/assignment/groupAssignments‐routes.js
 import express from "express";
-
-import CourseInstance from "../course/courseinstance-model.js";
+import { body, param, oneOf, validationResult } from "express-validator";
+import mongoose from "mongoose";
+import groupAssignmentModel from "./groupAssignment-model.js";
 import { authmiddleware, authorizedRole } from "../users/user-middleware.js";
 import upload from "../utlis/multer-config.js";
 
 const GroupAssignmentRouter = express.Router();
 
-// Middleware: Only teachers for the courseInstance can manage assignments
-const authorizeCourseTeacher = async (req, res, next) => {
+// Helper to turn multer’s files into { url, originalname } objects
+function makeFileUrls(files = []) {
+  return files.map(file => {
+    let rel = file.path
+      .replace(process.cwd(), "")
+      .replace(/\\/g, "/")
+      .replace(/^\/+/, "/");
+    return { url: rel, originalname: file.originalname };
+  });
+}
+
+// If any of the validators fail, send 400 + JSON errors
+const handleValidationErrors = (req, res, next) => {
+  const errs = validationResult(req);
+  if (!errs.isEmpty()) {
+    return res.status(400).json({ errors: errs.array() });
+  }
+  next();
+};
+// ─── Helper to fetch assignment + group or 404 ─────────────────
+async function loadAssignmentAndGroup(req, res, next) {
   try {
-    const courseInstanceId = req.body.courseInstance || req.courseInstanceId;
-    if (!courseInstanceId)
-      return res.status(400).json({ error: "CourseInstance required." });
-    const courseInstance = await CourseInstance.findById(courseInstanceId);
-    if (!courseInstance)
-      return res.status(404).json({ error: "CourseInstance not found." });
-    const teachers = Array.isArray(courseInstance.teacher)
-      ? courseInstance.teacher
-      : [courseInstance.teacher];
-    if (!teachers.some(id => id.equals(req.user._id))) {
-      return res.status(403).json({ error: "Not a teacher for this course." });
+    const { id, groupIdx } = req.params;
+    if (!mongoose.isValidObjectId(id) || isNaN(groupIdx)) {
+      return res.status(400).json({ error: "Invalid ID or group index" });
     }
+    const assignment = await groupAssignmentModel.findById(id);
+    if (!assignment) return res.status(404).json({ error: "Assignment not found" });
+
+    req.assignment = assignment;
+    req.group      = assignment.groups[Number(groupIdx)];
+    if (!req.group) return res.status(404).json({ error: "Group not found" });
+
     next();
   } catch (err) {
-    res.status(500).json({ error: "Authorization error." });
+    console.error(err);
+    res.status(500).json({ error: err.message });
   }
-};
+}
 
-// 1. Create Group Assignment (teacher only, bulk groups supported)
+
 GroupAssignmentRouter.post(
   "/",
   authmiddleware,
   authorizedRole("teacher"),
-  authorizeCourseTeacher,
+
+  // 1) File uploads via multer
+  upload.fields([
+    { name: "media" },
+    { name: "documents" }
+  ]),
+
+  // 2) If groups arrived as JSON string, parse it
+  (req, res, next) => {
+    if (typeof req.body.groups === "string") {
+      try { req.body.groups = JSON.parse(req.body.groups); }
+      catch (_) { /* leave as string so validator will catch it */ }
+    }
+    next();
+  },
+
+  // 3) Validation chain
+  [
+    // A) Must have either global or all-groups overrides:
+    body().custom(body => {
+      // detect any non‑empty global
+      const hasGlobal =
+        (typeof body.title   === "string" && body.title.trim() !== "") ||
+        (typeof body.content === "string" && body.content.trim() !== "");
+
+      if (hasGlobal) return true;
+
+      // otherwise require groups
+      if (!Array.isArray(body.groups) || body.groups.length === 0) {
+        throw new Error("Either set a global title/content or create at least one group");
+      }
+
+      // and each group must have its own title+content:
+      body.groups.forEach((g, i) => {
+        if (typeof g.title   !== "string" || !g.title.trim())
+          throw new Error(`Group #${i+1} needs its own title`);
+        if (typeof g.content !== "string" || !g.content.trim())
+          throw new Error(`Group #${i+1} needs its own content`);
+      });
+
+      return true;
+    }),
+
+    // B) Top‑level fields
+    body("content")
+      .optional({ checkFalsy: true })
+      .isString().withMessage("Content must be a string when provided"),
+
+    body("courseInstance")
+      .isMongoId().withMessage("courseInstance must be a valid ID"),
+
+    body("topic")
+      .optional().isMongoId().withMessage("topic must be a valid ID"),
+
+    body("dueDate")
+      .optional()
+      .isISO8601().withMessage("dueDate must be ISO8601")
+      .custom(d => new Date(d) >= new Date())
+      .withMessage("dueDate cannot be in the past"),
+
+    body("points")
+      .isInt({ min: 0 }).withMessage("Points must be a non‑negative integer"),
+
+    // C) groups array
+    body("groups")
+      .isArray({ min: 1 }).withMessage("You must create at least one group"),
+
+    // D) per‑group required fields
+    body("groups.*.members")
+      .isArray({ min: 1 }).withMessage("Each group needs at least one member"),
+    body("groups.*.members.*")
+      .isMongoId().withMessage("Each member ID must be a valid student ID"),
+
+    body("groups.*.name")
+      .isString().withMessage("Group name must be a string")
+      .notEmpty().withMessage("Group name is required"),
+
+    body("groups.*.task")
+      .isString().withMessage("Group task must be a string")
+      .notEmpty().withMessage("Group task is required"),
+
+    // E) per‑group optional overrides
+    body("groups.*.title")
+      .optional().isString().withMessage("Group title must be a string"),
+
+    body("groups.*.content")
+      .optional().isString().withMessage("Group content must be a string"),
+
+    // … you can add more validators for points, dueDate, media, etc.
+  ],
+
+  // 4) If any validation failed, return 400 + errors
+  handleValidationErrors,
+
+  // 5) Actual handler: assemble & save
   async (req, res) => {
     try {
-      const assignment = new GroupAssignment({
+      const media     = makeFileUrls(req.files?.media     || []);
+      const documents = makeFileUrls(req.files?.documents || []);
+
+      // build the payload
+      const payload = {
         ...req.body,
-        postedBy: req.user._id
-      });
-      await assignment.save();
-      res.status(201).json({ success: true, data: assignment });
-    } catch (err) {
-      res.status(400).json({ success: false, error: err.message });
-    }
-  }
-);
-
-// 2. Get Assignment Details (all roles)
-GroupAssignmentRouter.get("/:id", authmiddleware, async (req, res) => {
-  try {
-    const assignment = await GroupAssignment.findById(req.params.id)
-      .populate("postedBy", "username email")
-      .populate("courseInstance")
-      .populate("topic", "title description")
-      .populate("groups.members", "username email")
-      .populate("groups.topic", "title")
-      .populate("groups.participation.user", "username email");
-    if (!assignment)
-      return res.status(404).json({ error: "Assignment not found" });
-    res.json({ success: true, assignment });
-  } catch (err) {
-    res.status(400).json({ success: false, error: err.message });
-  }
-});
-
-// 3. Submit as Group (one member uploads, per-group docs/messages)
-GroupAssignmentRouter.post(
-  "/:id/group/:groupIdx/submit",
-  authmiddleware,
-  upload.array("files", 10),
-  async (req, res) => {
-    try {
-      const { id, groupIdx } = req.params;
-      const assignment = await GroupAssignment.findById(id);
-      if (!assignment)
-        return res.status(404).json({ error: "Assignment not found" });
-      const group = assignment.groups[groupIdx];
-      if (!group)
-        return res.status(404).json({ error: "Group not found" });
-      if (!group.members.some(m => m.equals(req.user._id))) {
-        return res.status(403).json({ error: "Not a member of this group" });
-      }
-      const files =
-        req.files?.map(f =>
-          "/" + f.path.replace(process.cwd(), "").replace(/\\/g, "/")
-        ) || [];
-      // Save submission
-      const newSubmission = {
-        submittedBy: req.user._id,
-        files,
-        message: req.body.message || ""
+        postedBy:  req.user.id,
+        media,
+        documents
       };
-      group.submissions.push(newSubmission);
 
-      // Calculate submissionPoints (auto)
-      if (assignment.dueDate && group.submissions.length === 1) {
-        const submittedAt = new Date();
-        const due = new Date(assignment.dueDate);
-        const diffMs = submittedAt - due;
-        const diffDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
-        let points = 0;
-        if (diffMs <= 0) points = 20;
-        else if (diffDays === 1) points = 18;
-        else if (diffDays <= 5) points = 15;
-        else if (diffDays <= 10) points = 8;
-        group.submissionPoints = points;
+      // ────── NEW PATCH ──────
+      // if user didn't set global title/content, copy from first group
+      if (!payload.title && Array.isArray(payload.groups) && payload.groups.length) {
+        payload.title   = payload.groups[0].title;
+        payload.content = payload.groups[0].content;
       }
 
+      const assignment = new groupAssignmentModel(payload);
       await assignment.save();
-      res.json({
-        success: true,
-        submissions: group.submissions,
-        submissionPoints: group.submissionPoints
-      });
+
+      res.status(201).json(assignment);
     } catch (err) {
-      res.status(400).json({ success: false, error: err.message });
+      console.error(err);
+      res.status(500).json({ error: err.message });
     }
   }
 );
 
-// 4. Group Discussion Message (auto-increment messageCount)
+
+
+
+// --- 7. POST in group DISCUSSION ---
 GroupAssignmentRouter.post(
-  "/:id/group/:groupIdx/discuss",
+  "/:id/group/:groupIdx/discussion",
   authmiddleware,
+  loadAssignmentAndGroup,
+  [body("message").isString().notEmpty()],
+  handleValidationErrors,
   async (req, res) => {
     try {
-      const { id, groupIdx } = req.params;
-      const { message } = req.body;
-      const userId = req.user._id;
-      const assignment = await GroupAssignment.findById(id);
-      if (!assignment)
-        return res.status(404).json({ error: "Assignment not found" });
-      const group = assignment.groups[groupIdx];
-      if (!group)
-        return res.status(404).json({ error: "Group not found" });
-      if (!group.members.some(m => m.equals(userId))) {
-        return res.status(403).json({ error: "Not a member of this group" });
-      }
-      group.discussion.push({ user: userId, message });
-
-      // Update messageCount for this user in participation
-      let part = group.participation.find(p => p.user.equals(userId));
-      if (!part) {
-        part = {
-          user: userId,
-          messageCount: 1,
-          discussionMinutes: 0,
-          files: [],
-          contribution: "",
-          discussionPoints: 0
-        };
-        group.participation.push(part);
-      } else {
-        part.messageCount = (part.messageCount || 0) + 1;
-      }
-      await assignment.save();
-      res.json({
-        success: true,
-        discussion: group.discussion,
-        participation: group.participation
+      const { assignment, group } = req;
+      group.discussion.push({
+        user: req.user._id,
+        message: req.body.message,
       });
+
+      // update participation
+      let part = group.participation.find(p => p.user.equals(req.user._id));
+      if (part) part.messageCount++;
+      else group.participation.push({
+        user: req.user._id,
+        contribution: "",
+        files: [],
+        messageCount: 1,
+        discussionMinutes: 0
+      });
+
+      await assignment.save();
+      res.json({ message: "Posted to discussion" });
     } catch (err) {
-      res.status(400).json({ success: false, error: err.message });
+      console.error(err);
+      res.status(500).json({ error: err.message });
     }
   }
 );
 
-// 5. Participation/Logsheet Update (student or teacher)
-GroupAssignmentRouter.post(
+// --- 8. PATCH group PARTICIPATION/LOGSHEET ---
+GroupAssignmentRouter.patch(
+  "/:id/group/:groupIdx/participation/:userId",
+  authmiddleware,
+  loadAssignmentAndGroup,
+  [
+    param("userId").isMongoId(),
+    // allow any of these fields
+    oneOf([
+      body("contribution").exists(),
+      body("files").exists(),
+      body("messageCount").exists(),
+      body("discussionMinutes").exists()
+    ], "At least one participation field required"),
+  ],
+  handleValidationErrors,
+  async (req, res) => {
+    try {
+      const { assignment, group } = req;
+      const part = group.participation.find(p => p.user.equals(req.params.userId));
+      if (part) {
+        Object.assign(part, req.body);
+      } else {
+        group.participation.push({ user: req.params.userId, ...req.body });
+      }
+      await assignment.save();
+      res.json({ message: "Participation updated" });
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ error: err.message });
+    }
+  }
+);
+
+// --- 9. PATCH group MARKS (teacher grading) ---
+GroupAssignmentRouter.patch(
+  "/:id/group/:groupIdx/marks",
+  authmiddleware,
+  authorizedRole("teacher"),
+  loadAssignmentAndGroup,
+  [
+    body("marks").isNumeric(),
+    body("feedback").optional().isString()
+  ],
+  handleValidationErrors,
+  async (req, res) => {
+    try {
+      const { assignment, group } = req;
+      group.marks = req.body.marks;
+      if (req.body.feedback !== undefined) group.feedback = req.body.feedback;
+      await assignment.save();
+      res.json({ message: "Marks updated", marks: group.marks });
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ error: err.message });
+    }
+  }
+);
+
+// --- 10. GET participation/marks for a group ---
+GroupAssignmentRouter.get(
   "/:id/group/:groupIdx/participation",
   authmiddleware,
-  upload.array("files", 5),
+  loadAssignmentAndGroup,
   async (req, res) => {
     try {
-      const { id, groupIdx } = req.params;
-      const { contribution, discussionPoints } = req.body;
-      const userId = req.user._id;
-      const files =
-        req.files?.map(f =>
-          "/" + f.path.replace(process.cwd(), "").replace(/\\/g, "/")
-        ) || [];
-      const assignment = await GroupAssignment.findById(id);
-      if (!assignment)
-        return res.status(404).json({ error: "Assignment not found" });
-      const group = assignment.groups[groupIdx];
-      if (!group)
-        return res.status(404).json({ error: "Group not found" });
-      let part = group.participation.find(p => p.user.equals(userId));
-      if (!part) {
-        part = {
-          user: userId,
-          files: [],
-          messageCount: 0,
-          discussionMinutes: 0,
-          contribution: "",
-          discussionPoints: 0
-        };
-        group.participation.push(part);
-      }
-      part.contribution = contribution ?? part.contribution;
-      part.files = part.files ? part.files.concat(files) : files;
-      if (typeof discussionPoints !== "undefined") {
-        part.discussionPoints = Number(discussionPoints);
-      }
-      await assignment.save();
-      res.json({ success: true, participation: group.participation });
+      const { group } = req;
+      res.json({
+        participation: group.participation,
+        marks: group.marks,
+        feedback: group.feedback
+      });
     } catch (err) {
-      res.status(400).json({ success: false, error: err.message });
-    }
-  }
-);
-
-// 6. Teacher sets grading (answerPoints/discussionPoints/feedback/marks)
-GroupAssignmentRouter.post(
-  "/:id/group/:groupIdx/grade",
-  authmiddleware,
-  authorizedRole("teacher"),
-  async (req, res, next) => {
-    const assignment = await GroupAssignment.findById(req.params.id);
-    if (!assignment)
-      return res.status(404).json({ error: "Assignment not found." });
-    req.body.courseInstance = assignment.courseInstance;
-    next();
-  },
-  authorizeCourseTeacher,
-  async (req, res) => {
-    try {
-      const { id, groupIdx } = req.params;
-      const { answerPoints, discussionPoints, feedback } = req.body;
-      const assignment = await GroupAssignment.findById(id);
-      const group = assignment.groups[groupIdx];
-      if (!group)
-        return res.status(404).json({ error: "Group not found" });
-
-      if (typeof answerPoints !== "undefined")
-        group.answerPoints = Number(answerPoints);
-      if (typeof discussionPoints !== "undefined")
-        group.discussionPoints = Number(discussionPoints);
-      if (typeof feedback !== "undefined")
-        group.feedback = feedback;
-
-      group.marks =
-        (group.answerPoints || 0) +
-        (group.submissionPoints || 0) +
-        (group.discussionPoints || 0);
-
-      await assignment.save();
-      res.json({ success: true, marks: group.marks, group });
-    } catch (err) {
-      res.status(400).json({ success: false, error: err.message });
-    }
-  }
-);
-
-// 7. (Optional) Teacher can PATCH group details (e.g., per-group title/content/docs)
-GroupAssignmentRouter.patch(
-  "/:id/group/:groupIdx",
-  authmiddleware,
-  authorizedRole("teacher"),
-  async (req, res, next) => {
-    const assignment = await GroupAssignment.findById(req.params.id);
-    if (!assignment)
-      return res.status(404).json({ error: "Assignment not found." });
-    req.body.courseInstance = assignment.courseInstance;
-    next();
-  },
-  authorizeCourseTeacher,
-  async (req, res) => {
-    try {
-      const { id, groupIdx } = req.params;
-      const { title, content, documents } = req.body;
-      const assignment = await GroupAssignment.findById(id);
-      const group = assignment.groups[groupIdx];
-      if (!group)
-        return res.status(404).json({ error: "Group not found" });
-      if (title) group.title = title;
-      if (content) group.content = content;
-      if (documents) group.documents = documents;
-      await assignment.save();
-      res.json({ success: true, group });
-    } catch (err) {
-      res.status(400).json({ success: false, error: err.message });
+      console.error(err);
+      res.status(500).json({ error: err.message });
     }
   }
 );
