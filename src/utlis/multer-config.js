@@ -107,6 +107,8 @@ function getRootFolder(req) {
   if (req.baseUrl.includes("announcement")) return "announcements";
   if (req.baseUrl.includes("assignment")) return "assignments";
   if (req.baseUrl.includes("question")) return "questions";
+    if (req.baseUrl.includes("groupAssignment")) return "group-assignments"; // <--- Add this line
+
   return ""; // fallback
 }
 
