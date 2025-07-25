@@ -1,10 +1,10 @@
 import express from "express";
-import GroupAssignment from "../models/groupAssignment.js";
+
 import CourseInstance from "../course/courseinstance-model.js";
-import { authmiddleware, authorized } from "../users/user-middleware.js";
+import { authmiddleware, authorizedRole } from "../users/user-middleware.js";
 import upload from "../utlis/multer-config.js";
 
-const router = express.Router();
+const GroupAssignmentRouter = express.Router();
 
 // Middleware: Only teachers for the courseInstance can manage assignments
 const authorizeCourseTeacher = async (req, res, next) => {
@@ -28,10 +28,10 @@ const authorizeCourseTeacher = async (req, res, next) => {
 };
 
 // 1. Create Group Assignment (teacher only, bulk groups supported)
-router.post(
+GroupAssignmentRouter.post(
   "/",
   authmiddleware,
-  authorized("teacher"),
+  authorizedRole("teacher"),
   authorizeCourseTeacher,
   async (req, res) => {
     try {
@@ -48,7 +48,7 @@ router.post(
 );
 
 // 2. Get Assignment Details (all roles)
-router.get("/:id", authmiddleware, async (req, res) => {
+GroupAssignmentRouter.get("/:id", authmiddleware, async (req, res) => {
   try {
     const assignment = await GroupAssignment.findById(req.params.id)
       .populate("postedBy", "username email")
@@ -66,7 +66,7 @@ router.get("/:id", authmiddleware, async (req, res) => {
 });
 
 // 3. Submit as Group (one member uploads, per-group docs/messages)
-router.post(
+GroupAssignmentRouter.post(
   "/:id/group/:groupIdx/submit",
   authmiddleware,
   upload.array("files", 10),
@@ -121,7 +121,7 @@ router.post(
 );
 
 // 4. Group Discussion Message (auto-increment messageCount)
-router.post(
+GroupAssignmentRouter.post(
   "/:id/group/:groupIdx/discuss",
   authmiddleware,
   async (req, res) => {
@@ -168,7 +168,7 @@ router.post(
 );
 
 // 5. Participation/Logsheet Update (student or teacher)
-router.post(
+GroupAssignmentRouter.post(
   "/:id/group/:groupIdx/participation",
   authmiddleware,
   upload.array("files", 5),
@@ -213,10 +213,10 @@ router.post(
 );
 
 // 6. Teacher sets grading (answerPoints/discussionPoints/feedback/marks)
-router.post(
+GroupAssignmentRouter.post(
   "/:id/group/:groupIdx/grade",
   authmiddleware,
-  authorized("teacher"),
+  authorizedRole("teacher"),
   async (req, res, next) => {
     const assignment = await GroupAssignment.findById(req.params.id);
     if (!assignment)
@@ -255,10 +255,10 @@ router.post(
 );
 
 // 7. (Optional) Teacher can PATCH group details (e.g., per-group title/content/docs)
-router.patch(
+GroupAssignmentRouter.patch(
   "/:id/group/:groupIdx",
   authmiddleware,
-  authorized("teacher"),
+  authorizedRole("teacher"),
   async (req, res, next) => {
     const assignment = await GroupAssignment.findById(req.params.id);
     if (!assignment)
@@ -286,4 +286,4 @@ router.patch(
   }
 );
 
-export default router;
+export default GroupAssignmentRouter;
