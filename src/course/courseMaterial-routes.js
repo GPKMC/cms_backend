@@ -155,19 +155,33 @@ CourseMaterialRouter.patch("/:id",
 
       if (req.body.title) material.title = req.body.title;
       if (req.body.content) material.content = req.body.content;
-      if (req.body.topic) material.topic = req.body.topic;
-
+     if (req.body.topic === "" || req.body.topic === null || req.body.topic === "null") {
+          material.topic = undefined;
+        } else {
+          material.topic = req.body.topic;
+        }
       if (req.body.links) material.links = JSON.parse(req.body.links);
       if (req.body.youtubeLinks) material.youtubeLinks = JSON.parse(req.body.youtubeLinks);
 
-      // Remove media/docs if specified
-      if (req.body.mediaToRemove) {
-        const toRemove = JSON.parse(req.body.mediaToRemove);
-        material.media = material.media.filter(url => !toRemove.includes(url));
+       if (req.body.mediaToRemove) {
+        let toRemove = [];
+        try {
+          toRemove = JSON.parse(req.body.mediaToRemove);
+        } catch {
+          return res.status(400).json({ error: "Invalid mediaToRemove payload" });
+        }
+        material.media = material.media.filter(item => !toRemove.includes(item.url));
       }
+
+      // 6. Remove existing documents if requested
       if (req.body.documentsToRemove) {
-        const toRemove = JSON.parse(req.body.documentsToRemove);
-        material.documents = material.documents.filter(url => !toRemove.includes(url));
+        let toRemoveDocs = [];
+        try {
+          toRemoveDocs = JSON.parse(req.body.documentsToRemove);
+        } catch {
+          return res.status(400).json({ error: "Invalid documentsToRemove payload" });
+        }
+        material.documents = material.documents.filter(item => !toRemoveDocs.includes(item.url));
       }
 
       // Add new files if any

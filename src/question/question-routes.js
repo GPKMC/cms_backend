@@ -148,6 +148,78 @@ QuestionRouter.delete(
   }
 );
 
+// // PATCH: Update question (Only by posted teacher)
+// QuestionRouter.patch(
+//   "/:id",
+//   upload.fields([
+//     { name: "media", maxCount: 10 },
+//     { name: "documents", maxCount: 10 },
+//   ]),
+//   authmiddleware,
+//   authorizedRole("teacher"),
+//   async (req, res) => {
+//     try {
+//       const question = await questionModel.findById(req.params.id);
+//       if (!question) return res.status(404).json({ error: "Question not found" });
+//       if (!question.postedBy.equals(req.user._id))
+//         return res.status(403).json({ error: "You are not allowed to update this question" });
+
+//       if (req.body.dueDate) {
+//         const now = new Date();
+//         const dueDate = new Date(req.body.dueDate);
+//         if (dueDate < now) {
+//           return res.status(400).json({ error: "Due date/time cannot be in the past." });
+//         }
+//         question.dueDate = req.body.dueDate;
+//       }
+//       if (req.body.title) question.title = req.body.title;
+//       if (req.body.content) question.content = req.body.content;
+//       if ("topic" in req.body) {
+//         if (req.body.topic === "" || req.body.topic === null || req.body.topic === "null") {
+//           question.topic = undefined;
+//         } else {
+//           question.topic = req.body.topic;
+//         }
+//       }
+
+//       if (req.body.points) question.points = req.body.points;
+//       if (req.body.links) question.links = JSON.parse(req.body.links);
+//       if (req.body.youtubeLinks) question.youtubeLinks = JSON.parse(req.body.youtubeLinks);
+
+//       // Remove media/docs if specified
+//       if (req.body.mediaToRemove) {
+//         const toRemove = JSON.parse(req.body.mediaToRemove);
+//         question.media = question.media.filter(url => !toRemove.includes(url));
+//       }
+//       if (req.body.documentsToRemove) {
+//         const toRemove = JSON.parse(req.body.documentsToRemove);
+//         question.documents = question.documents.filter(url => !toRemove.includes(url));
+//       }
+
+//       // Add new files if any
+//       if (req.files?.media) {
+//         question.media = [...question.media, ...makeFileUrls(req.files.media)];
+//       }
+//       if (req.files?.documents) {
+//         question.documents = [...question.documents, ...makeFileUrls(req.files.documents)];
+//       }
+
+//       if (req.body.commentsDisabled !== undefined)
+//         question.commentsDisabled = req.body.commentsDisabled === "true";
+//       if (req.body.mutedStudents)
+//         question.mutedStudents = JSON.parse(req.body.mutedStudents);
+//       if (req.body.visibleTo)
+//         question.visibleTo = JSON.parse(req.body.visibleTo);
+
+//       await question.save();
+
+//       res.status(201).json({ question: question.toObject() });
+//     } catch (err) {
+//       res.status(500).json({ error: err.message });
+//     }
+//   }
+// );
+
 // PATCH: Update question (Only by posted teacher)
 QuestionRouter.patch(
   "/:id",
@@ -159,65 +231,111 @@ QuestionRouter.patch(
   authorizedRole("teacher"),
   async (req, res) => {
     try {
+      // 1. Find the question
       const question = await questionModel.findById(req.params.id);
-      if (!question) return res.status(404).json({ error: "Question not found" });
-      if (!question.postedBy.equals(req.user._id))
-        return res.status(403).json({ error: "You are not allowed to update this question" });
+      if (!question) {
+        return res.status(404).json({ error: "Question not found" });
+      }
 
+      // 2. Ensure only the posting teacher can update
+      if (!question.postedBy.equals(req.user._id)) {
+        return res.status(403).json({ error: "You are not allowed to update this question" });
+      }
+
+      // 3. Validate and update dueDate if provided
       if (req.body.dueDate) {
         const now = new Date();
         const dueDate = new Date(req.body.dueDate);
         if (dueDate < now) {
           return res.status(400).json({ error: "Due date/time cannot be in the past." });
         }
-        question.dueDate = req.body.dueDate;
+        question.dueDate = dueDate;
       }
-      if (req.body.title) question.title = req.body.title;
-      if (req.body.content) question.content = req.body.content;
-      if ("topic" in req.body) {
-        if (req.body.topic === "" || req.body.topic === null || req.body.topic === "null") {
+
+      // 4. Update simple fields
+      if (req.body.title)      question.title      = req.body.title;
+      if (req.body.content)    question.content    = req.body.content;
+       if (req.body.topic === "" || req.body.topic === null || req.body.topic === "null") {
           question.topic = undefined;
         } else {
           question.topic = req.body.topic;
         }
+      if (req.body.points)     question.points     = Number(req.body.points);
+      if (req.body.links) {
+        try {
+          question.links = JSON.parse(req.body.links);
+        } catch {
+          return res.status(400).json({ error: "Invalid links payload" });
+        }
       }
-
-      if (req.body.points) question.points = req.body.points;
-      if (req.body.links) question.links = JSON.parse(req.body.links);
-      if (req.body.youtubeLinks) question.youtubeLinks = JSON.parse(req.body.youtubeLinks);
-
-      // Remove media/docs if specified
-      if (req.body.mediaToRemove) {
-        const toRemove = JSON.parse(req.body.mediaToRemove);
-        question.media = question.media.filter(url => !toRemove.includes(url));
+      if (req.body.youtubeLinks) {
+        try {
+          question.youtubeLinks = JSON.parse(req.body.youtubeLinks);
+        } catch {
+          return res.status(400).json({ error: "Invalid youtubeLinks payload" });
+        }
       }
-      if (req.body.documentsToRemove) {
-        const toRemove = JSON.parse(req.body.documentsToRemove);
-        question.documents = question.documents.filter(url => !toRemove.includes(url));
-      }
-
-      // Add new files if any
-      if (req.files?.media) {
-        question.media = [...question.media, ...makeFileUrls(req.files.media)];
-      }
-      if (req.files?.documents) {
-        question.documents = [...question.documents, ...makeFileUrls(req.files.documents)];
-      }
-
-      if (req.body.commentsDisabled !== undefined)
+      if (req.body.commentsDisabled !== undefined) {
         question.commentsDisabled = req.body.commentsDisabled === "true";
-      if (req.body.mutedStudents)
-        question.mutedStudents = JSON.parse(req.body.mutedStudents);
-      if (req.body.visibleTo)
-        question.visibleTo = JSON.parse(req.body.visibleTo);
+      }
+      if (req.body.mutedStudents) {
+        try {
+          question.mutedStudents = JSON.parse(req.body.mutedStudents);
+        } catch {
+          return res.status(400).json({ error: "Invalid mutedStudents payload" });
+        }
+      }
+      if (req.body.visibleTo) {
+        try {
+          question.visibleTo = JSON.parse(req.body.visibleTo);
+        } catch {
+          return res.status(400).json({ error: "Invalid visibleTo payload" });
+        }
+      }
 
+      // 5. Remove existing media items if requested
+      if (req.body.mediaToRemove) {
+        let toRemove = [];
+        try {
+          toRemove = JSON.parse(req.body.mediaToRemove);
+        } catch {
+          return res.status(400).json({ error: "Invalid mediaToRemove payload" });
+        }
+        question.media = question.media.filter(item => !toRemove.includes(item.url));
+      }
+
+      // 6. Remove existing documents if requested
+      if (req.body.documentsToRemove) {
+        let toRemoveDocs = [];
+        try {
+          toRemoveDocs = JSON.parse(req.body.documentsToRemove);
+        } catch {
+          return res.status(400).json({ error: "Invalid documentsToRemove payload" });
+        }
+        question.documents = question.documents.filter(item => !toRemoveDocs.includes(item.url));
+      }
+
+      // 7. Append newly uploaded media
+      if (req.files?.media) {
+        const newMedia = makeFileUrls(req.files.media);
+        question.media = question.media.concat(newMedia);
+      }
+
+      // 8. Append newly uploaded documents
+      if (req.files?.documents) {
+        const newDocs = makeFileUrls(req.files.documents);
+        question.documents = question.documents.concat(newDocs);
+      }
+
+      // 9. Save and respond
       await question.save();
-
-      res.status(201).json({ question: question.toObject() });
+      res.status(200).json({ question: question.toObject() });
     } catch (err) {
+      console.error("Error updating question:", err);
       res.status(500).json({ error: err.message });
     }
   }
 );
+
 
 export default QuestionRouter;
