@@ -20,6 +20,7 @@ import AssignmentRouter from './assignment/assignment-router.js';
 import FeedRouter from './course/course-feed.js';
 import QuestionRouter from './question/question-routes.js';
 import GroupAssignmentRouter from './assignment/groupAssignments-routes.js';
+import QuizRouter from './quizQuestion/Quizrouter.js';
 
 
 
@@ -52,6 +53,9 @@ app.use('/assignment', AssignmentRouter);
 app.use('/question', QuestionRouter);
 app.use('/Coursefeeds', FeedRouter);
 app.use('/group-assignment',GroupAssignmentRouter );
+app.use('/quizrouter', QuizRouter);
+
+
 
 
 const PORT = process.env.PORT || 5000;
