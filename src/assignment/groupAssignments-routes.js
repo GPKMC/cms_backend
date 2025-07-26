@@ -66,7 +66,17 @@ GroupAssignmentRouter.post(
       try { req.body.groups = JSON.parse(req.body.groups); }
       catch (_) { /* leave as string so validator will catch it */ }
     }
-    next();
+
+      if (Array.isArray(req.body.groups)) {
+    req.body.groups = req.body.groups.map(g => {
+      // turn "" into undefined so Mongoose will just ignore it
+      if (typeof g.topic === "string" && g.topic.trim() === "") {
+        delete g.topic;
+      }
+      return g;
+    });
+  }
+  next();
   },
 
   // 3) Validation chain
@@ -104,8 +114,10 @@ GroupAssignmentRouter.post(
     body("courseInstance")
       .isMongoId().withMessage("courseInstance must be a valid ID"),
 
-    body("topic")
-      .optional().isMongoId().withMessage("topic must be a valid ID"),
+    body("groups.*.topic")
+  .optional({ checkFalsy: true })      // ← treats "", null, undefined all as “absent”
+  .isMongoId().withMessage("Each group.topic, if provided, must be a valid ID"),
+
 
     body("dueDate")
       .optional()

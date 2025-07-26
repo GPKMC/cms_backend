@@ -96,7 +96,7 @@ AssignmentRouter.get(
   authorizedRole("teacher", "student"),
   async (req, res) => {
     try {
-      const assignment = await assignment_model.findById(req.params.id)
+      const assignment = await Assignment.findById(req.params.id)
         .populate("postedBy", "username email role")
         .lean();
       if (!assignment) return res.status(404).json({ error: "Not found" });
@@ -156,7 +156,11 @@ AssignmentRouter.patch(
 
       if (req.body.title) assignment.title = req.body.title;
       if (req.body.content) assignment.content = req.body.content;
-      if (req.body.topic) assignment.topic = req.body.topic;
+      if (req.body.topic === "" || req.body.topic === null || req.body.topic === "null") {
+          assignment.topic = undefined;
+        } else {
+          assignment.topic = req.body.topic;
+        }
       if (req.body.dueDate) assignment.dueDate = req.body.dueDate;
       if (req.body.points) assignment.points = req.body.points;
 
@@ -165,12 +169,22 @@ AssignmentRouter.patch(
 
       // Remove media/docs if specified
       if (req.body.mediaToRemove) {
-        const toRemove = JSON.parse(req.body.mediaToRemove);
-        assignment.media = assignment.media.filter(url => !toRemove.includes(url));
+        let toRemove = [];
+        try {
+          toRemove = JSON.parse(req.body.mediaToRemove);
+        } catch {
+          return res.status(400).json({ error: "Invalid mediaToRemove payload" });
+        }
+        assignment.media = assignment.media.filter(item => !toRemove.includes(item.url));
       }
-      if (req.body.documentsToRemove) {
-        const toRemove = JSON.parse(req.body.documentsToRemove);
-        assignment.documents = assignment.documents.filter(url => !toRemove.includes(url));
+       if (req.body.documentsToRemove) {
+        let toRemoveDocs = [];
+        try {
+          toRemoveDocs = JSON.parse(req.body.documentsToRemove);
+        } catch {
+          return res.status(400).json({ error: "Invalid documentsToRemove payload" });
+        }
+        assignment.documents = assignment.documents.filter(item => !toRemoveDocs.includes(item.url));
       }
 
       // Add new files if any
