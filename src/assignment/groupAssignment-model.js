@@ -33,6 +33,7 @@ const participationSchema = new Schema({
 // ——— Per‑group schema ———
 const groupSchema = new Schema({
   // What this group must do (always present)
+  
   task:    { type: String, required: true },
 
   // Optional human‑readable name for the group
@@ -63,15 +64,15 @@ const groupSchema = new Schema({
   // Grading fields
   marks:    Number,
   feedback: String
-}, { _id: false });
+}, );
 
 // ——— Top‑level group assignment schema ———
 const groupAssignmentSchema = new Schema({
   // Global assignment fields
   title:         { type: String, required: true },
-  content:       { type: String, required: true },
-  postedBy:      { type: Schema.Types.ObjectId, ref: "User", required: true },
-  courseInstance:{ type: Schema.Types.ObjectId, ref: "CourseInstance", required: true },
+  content:       { type: String,  },
+  postedBy:      { type: Schema.Types.ObjectId, ref: "User", },
+  courseInstance:{ type: Schema.Types.ObjectId, ref: "CourseInstance", },
   topic:         { type: Schema.Types.ObjectId, ref: "Topic" },
 
   // Global attachments & links

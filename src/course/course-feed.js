@@ -128,69 +128,92 @@ function bucket(items, arrName, topicMap, uncategorized) {
 }
 
 // Helper to bucket GroupAssignments, handling global vs per‑group overrides
+// function bucketGroupAssignments(groupAssignments, arrName, topicMap, uncategorized) {
+//   groupAssignments.forEach(asg => {
+//     // detect any per‐group override
+//     const hasOverride = asg.groups.some(g =>
+//       Boolean(
+//         g.title    || g.content ||
+//         (g.media?.length    ?? 0) > 0 ||
+//         (g.documents?.length?? 0) > 0 ||
+//         (g.youtubeLinks?.length ?? 0) > 0 ||
+//         (g.links?.length    ?? 0) > 0
+//       )
+//     );
+
+//     if (!hasOverride) {
+//       // CASE #1: no overrides → one global feed item
+//       const feedItem = {
+//         _id:          asg._id,
+//         type:         "groupAssignment",
+//         title:        asg.title,
+//         content:      asg.content,
+//         media:        asg.media,
+//         documents:    asg.documents,
+//         youtubeLinks: asg.youtubeLinks,
+//         links:        asg.links,
+//         groups:       asg.groups.map(g => ({
+//           id:      g.id,
+//           name:    g.name,
+//           members: g.members
+//         })),
+//         postedBy:     asg.postedBy,
+//         createdAt:    asg.createdAt,
+//         updatedAt:    asg.updatedAt
+//       };
+//       const tid = asg.topic?.toString();
+//       if (tid && topicMap[tid]) topicMap[tid][arrName].push(feedItem);
+//       else uncategorized[arrName].push(feedItem);
+
+//     } else {
+//       // CASE #2: one feed item per group, merging overrides
+//       asg.groups.forEach(g => {
+//         const feedItem = {
+//           _id:          `${asg._id}_${g.id}`,  // unique per-group
+//           parentId:     asg._id,
+//           type:         "groupAssignment",
+//           groupName:    g.name,
+//           title:        g.title    || asg.title,
+//           content:      g.content  || asg.content,
+//           media:        (g.media?.length    ? g.media    : asg.media)    || [],
+//           documents:    (g.documents?.length? g.documents: asg.documents)|| [],
+//           youtubeLinks: (g.youtubeLinks?.length? g.youtubeLinks : asg.youtubeLinks)|| [],
+//           links:        (g.links?.length    ? g.links    : asg.links)    || [],
+//           members:      g.members,
+//           postedBy:     asg.postedBy,
+//           createdAt:    asg.createdAt,
+//           updatedAt:    asg.updatedAt
+//         };
+//         const tid = asg.topic?.toString();
+//         if (tid && topicMap[tid]) topicMap[tid][arrName].push(feedItem);
+//         else uncategorized[arrName].push(feedItem);
+//       });
+//     }
+//   });
+// }
 function bucketGroupAssignments(groupAssignments, arrName, topicMap, uncategorized) {
   groupAssignments.forEach(asg => {
-    // detect any per‐group override
-    const hasOverride = asg.groups.some(g =>
-      Boolean(
-        g.title    || g.content ||
-        (g.media?.length    ?? 0) > 0 ||
-        (g.documents?.length?? 0) > 0 ||
-        (g.youtubeLinks?.length ?? 0) > 0 ||
-        (g.links?.length    ?? 0) > 0
-      )
-    );
-
-    if (!hasOverride) {
-      // CASE #1: no overrides → one global feed item
-      const feedItem = {
-        _id:          asg._id,
-        type:         "groupAssignment",
-        title:        asg.title,
-        content:      asg.content,
-        media:        asg.media,
-        documents:    asg.documents,
-        youtubeLinks: asg.youtubeLinks,
-        links:        asg.links,
-        groups:       asg.groups.map(g => ({
-          id:      g.id,
-          name:    g.name,
-          members: g.members
-        })),
-        postedBy:     asg.postedBy,
-        createdAt:    asg.createdAt,
-        updatedAt:    asg.updatedAt
-      };
-      const tid = asg.topic?.toString();
-      if (tid && topicMap[tid]) topicMap[tid][arrName].push(feedItem);
-      else uncategorized[arrName].push(feedItem);
-
-    } else {
-      // CASE #2: one feed item per group, merging overrides
-      asg.groups.forEach(g => {
-        const feedItem = {
-          _id:          `${asg._id}_${g.id}`,  // unique per-group
-          parentId:     asg._id,
-          type:         "groupAssignment",
-          groupName:    g.name,
-          title:        g.title    || asg.title,
-          content:      g.content  || asg.content,
-          media:        (g.media?.length    ? g.media    : asg.media)    || [],
-          documents:    (g.documents?.length? g.documents: asg.documents)|| [],
-          youtubeLinks: (g.youtubeLinks?.length? g.youtubeLinks : asg.youtubeLinks)|| [],
-          links:        (g.links?.length    ? g.links    : asg.links)    || [],
-          members:      g.members,
-          postedBy:     asg.postedBy,
-          createdAt:    asg.createdAt,
-          updatedAt:    asg.updatedAt
-        };
-        const tid = asg.topic?.toString();
-        if (tid && topicMap[tid]) topicMap[tid][arrName].push(feedItem);
-        else uncategorized[arrName].push(feedItem);
-      });
-    }
+    // Always one feed item per assignment, with groups nested inside
+    const feedItem = {
+      _id:          asg._id,
+      type:         "groupAssignment",
+      title:        asg.title,
+      content:      asg.content,
+      media:        asg.media,
+      documents:    asg.documents,
+      youtubeLinks: asg.youtubeLinks,
+      links:        asg.links,
+      groups:       asg.groups, // ← pass all group info for frontend to handle
+      postedBy:     asg.postedBy,
+      createdAt:    asg.createdAt,
+      updatedAt:    asg.updatedAt
+    };
+    const tid = asg.topic?.toString();
+    if (tid && topicMap[tid]) topicMap[tid][arrName].push(feedItem);
+    else uncategorized[arrName].push(feedItem);
   });
 }
+
 
 FeedRouter.get(
   "/:courseInstanceId",

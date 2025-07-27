@@ -103,11 +103,11 @@ function ensureDir(dir) {
 
 // Get root folder based on endpoint
 function getRootFolder(req) {
+  if (req.baseUrl.includes("group-assignment")) return "group-assignments"; // <--- Add this line
   if (req.baseUrl.includes("materials")) return "course-materials";
   if (req.baseUrl.includes("announcement")) return "announcements";
   if (req.baseUrl.includes("assignment")) return "assignments";
   if (req.baseUrl.includes("question")) return "questions";
-    if (req.baseUrl.includes("groupAssignment")) return "group-assignments"; // <--- Add this line
 
   return ""; // fallback
 }
