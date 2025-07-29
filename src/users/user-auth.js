@@ -41,6 +41,9 @@ authRouter.post('/login', async (req, res) => {
     if (!user) {
       return res.status(400).json({ message: 'Invalid credentials.' });
     }
+if (user.isActive === false) {
+      return res.status(403).json({ message: "Your account is disabled. Please contact college administration." });
+    }
 
     // Check role matches
     if (user.role !== role) {

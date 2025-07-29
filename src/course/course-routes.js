@@ -237,10 +237,13 @@ courseRouter.patch('/course/:id', authmiddleware, authorizedRole("admin"), async
     if (req.body.type && !["compulsory", "elective"].includes(req.body.type)) {
       return res.status(400).json({ error: 'Invalid type. Must be compulsory or elective.' });
     }
-    // Update fields provided
-    Object.keys(req.body).forEach(key => {
-      course[key] = req.body[key];
-    });
+    // Only update fields present in req.body (prevent setting to undefined)
+   Object.keys(req.body).forEach(key => {
+  if (req.body[key] !== undefined && req.body[key] !== null) {
+    course[key] = req.body[key];
+  }
+});
+
     await course.save();
     const updatedCourse = await Course.findById(id).populate({
       path: 'semesterOrYear',
@@ -252,6 +255,7 @@ courseRouter.patch('/course/:id', authmiddleware, authorizedRole("admin"), async
     res.status(500).json({ error: 'Server error updating course.' });
   }
 });
+
 
 // DELETE: by ID
 courseRouter.delete('/course/:id', authmiddleware, authorizedRole("admin"), async (req, res) => {
