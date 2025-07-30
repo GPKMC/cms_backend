@@ -76,7 +76,7 @@ CourseInstancerouter.post('/courseInstance', authmiddleware, authorizedRole("adm
 });
 
 // GET all
-CourseInstancerouter.get('/courseInstance', authmiddleware, authorizedRole("admin"), async (req, res) => {
+CourseInstancerouter.get('/courseInstance', authmiddleware, authorizedRole("admin","teacher","student"), async (req, res) => {
   try {
     const { batch, course, teacher } = req.query;
     const query = {};
