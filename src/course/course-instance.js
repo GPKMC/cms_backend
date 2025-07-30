@@ -104,7 +104,7 @@ CourseInstancerouter.get('/courseInstance', authmiddleware, authorizedRole("admi
 CourseInstancerouter.get(
   "/courseInstance/:id",
   authmiddleware,
-  authorizedRole("admin", "teacher"),
+  authorizedRole("admin", "teacher", "student"),
   async (req, res) => {
     if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
       return res.status(400).json({ error: "Invalid ID" });
@@ -112,14 +112,22 @@ CourseInstancerouter.get(
 
     try {
       const instance = await CourseInstance.findById(req.params.id)
-        .populate("batch")
+        .populate({
+          path: "batch",
+          populate: {
+            path: "faculty",
+            select: "code type programLevel" // ✅ this fixes your issue
+          }
+        })
         .populate({
           path: "course",
+          select: "name code description type semesterOrYear",
           populate: {
             path: "semesterOrYear",
-            populate: { path: "faculty", select: "name code" },
+            populate: { path: "faculty", select: "name code programLevel" },
           },
         })
+
         .populate({ path: "teacher", select: "_id username email role" });
 
       if (!instance) return res.status(404).json({ error: "Not found" });
