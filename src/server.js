@@ -22,6 +22,7 @@ import QuestionRouter from './question/question-routes.js';
 import GroupAssignmentRouter from './assignment/groupAssignments-routes.js';
 import QuizRouter from './quizQuestion/Quizrouter.js';
 import StudentRoutes from './student-routes/student-sem.js';
+import StudentFeedRouter from './student-routes/material-feed.js';
 
 
 
@@ -56,6 +57,7 @@ app.use('/Coursefeeds', FeedRouter);
 app.use('/group-assignment',GroupAssignmentRouter );
 app.use('/quizrouter', QuizRouter);
 app.use('/student',StudentRoutes);
+app.use('/student',StudentFeedRouter);
 
 
 

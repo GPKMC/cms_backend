@@ -1,7 +1,7 @@
 // models/course-model.js
 
 import mongoose from 'mongoose';
-
+const { Schema } = mongoose;
 const courseSchema = new mongoose.Schema({
   name: {
     type: String,

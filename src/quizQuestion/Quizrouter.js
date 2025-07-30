@@ -34,7 +34,7 @@ QuizRouter.post(
         title:          req.body.title,
         description:    req.body.description,
         courseInstance: req.body.courseInstance,
-        createdBy:      req.user._id,
+        postedBy:      req.user._id,
         dueDate:        req.body.dueDate
       });
       res.status(201).json(quiz);

@@ -71,7 +71,7 @@ const groupAssignmentSchema = new Schema({
   // Global assignment fields
   title:         { type: String, required: true },
   content:       { type: String,  },
-  postedBy:      { type: Schema.Types.ObjectId, ref: "User", },
+  postedBy:      { type: Schema.Types.ObjectId, ref: "User", required:true},
   courseInstance:{ type: Schema.Types.ObjectId, ref: "CourseInstance", },
   topic:         { type: Schema.Types.ObjectId, ref: "Topic" },
 
