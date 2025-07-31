@@ -23,7 +23,12 @@ import GroupAssignmentRouter from './assignment/groupAssignments-routes.js';
 import QuizRouter from './quizQuestion/Quizrouter.js';
 import StudentRoutes from './student-routes/student-sem.js';
 import StudentFeedRouter from './student-routes/material-feed.js';
-
+import materialCommentRouter from './comment/materialComment-routes.js';
+import taskRouter from './student-routes/task-feed.js';
+import assignmentCommentRouter from './comment/assignmentComment-routes.js';
+import Refroutes from './plagiarism/refPost-routes.js';
+import cron from 'node-cron';
+import { processReferences } from './plagiarism/webiste_url_job.js';
 
 
 connectDB();
@@ -57,8 +62,21 @@ app.use('/Coursefeeds', FeedRouter);
 app.use('/group-assignment',GroupAssignmentRouter );
 app.use('/quizrouter', QuizRouter);
 app.use('/student',StudentRoutes);
-app.use('/student',StudentFeedRouter);
+app.use('/student',StudentFeedRouter);//for materials feed
+app.use('/student',taskRouter);//for tasks(assignment,quiz,questions and groupAssignments) feed
 
+app.use('/comment',materialCommentRouter);
+app.use('/comment',assignmentCommentRouter);
+app.use('/reference',Refroutes);
+
+// Run the job immediately on server start
+processReferences().catch(console.error);
+
+// Schedule job daily at midnight
+cron.schedule('0 0 * * *', () => {
+  console.log('Starting daily reference processing job...');
+  processReferences().catch(console.error);
+});
 
 
 
