@@ -4,7 +4,27 @@ const { Schema } = mongoose;
 // ——— Per‑group submission schema ———
 const groupSubmissionSchema = new Schema({
   submittedBy:   { type: Schema.Types.ObjectId, ref: "User", required: true },
-  files:         [String],
+  files:         [{
+    url: String,
+    originalname: String,
+    filetype: String,
+    extractedText: String,
+  }],
+  combinedText: { type: String, default: '' },
+  embedding: [{ type: Number }],
+  isFlagged: { type: Boolean, default: false },
+  plagiarismPercentage: { type: Number, default: 0 }, // Overall max similarity %
+  plagiarismMatches: [{
+  type: { type: String, enum: ['submission', 'reference'], required: true },
+  referenceId: { type: Schema.Types.ObjectId, ref: 'Reference' },
+  studentId: { type: Schema.Types.ObjectId, ref: 'User' },
+  similarity: { type: Number, required: true },       // similarity score (0 to 1)
+  matchedText: { type: String, required: true },      // exact plagiarized text snippet
+  lineNumber: { type: Number },                        // optional: line or sentence number in submission
+  startCharIndex: { type: Number },                    // optional: start char index in combinedText
+  endCharIndex: { type: Number }                       // optional: end char index in combinedText
+}]
+,
   message:       String,
   submittedAt:   { type: Date, default: Date.now },
   personalComments: [{
@@ -13,6 +33,7 @@ const groupSubmissionSchema = new Schema({
     createdAt: { type: Date, default: Date.now }
   }]
 }, { _id: false });
+
 
 // ——— Per‑group discussion schema ———
 const groupDiscussionSchema = new Schema({

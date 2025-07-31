@@ -23,6 +23,7 @@ const QuizQuestionSchema = new Schema({
   description:    { type: String, default: '' },
   courseInstance: { type: Schema.Types.ObjectId, ref: 'CourseInstance', required: true },
   postedBy:      { type: Schema.Types.ObjectId, ref: 'User', required: true },
+  topic: { type: Schema.Types.ObjectId, ref: "Topic" },
   dueDate:        { type: Date },
   published:      { type: Boolean, default: false },
   questions:      { type: [QuestionSchema], default: [] }
