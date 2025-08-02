@@ -23,7 +23,7 @@ for sub in db.submissions.find({}):
 for q in db.questionsubmissions.find({}):
     if q.get("answerText"):
         texts.append(q["answerText"])
-for ga in db.groupassignments.find({}):
+for ga in db.GroupAssignmentSubmission.find({}):
     for group in ga.get("groups", []):
         for gsub in group.get("submissions", []):
             if gsub.get("combinedText"):
