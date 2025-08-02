@@ -33,4 +33,5 @@ const submissionSchema = new Schema({
   plagiarismDetails: [plagiarismDetailSchema],     // Detailed per-chunk plagiarism matches
 });
 
-export default mongoose.model('Submission', submissionSchema);
+// Fix here: Check if model exists before defining it
+export default mongoose.models.Submission || mongoose.model('Submission', submissionSchema);

@@ -29,6 +29,7 @@ import assignmentCommentRouter from './comment/assignmentComment-routes.js';
 import Refroutes from './plagiarism/refPost-routes.js';
 import cron from 'node-cron';
 import { processReferences } from './plagiarism/webiste_url_job.js';
+import Submissionrouter from './plagiarism/submission-routes.js';
 
 
 connectDB();
@@ -68,6 +69,7 @@ app.use('/student',taskRouter);//for tasks(assignment,quiz,questions and groupAs
 app.use('/comment',materialCommentRouter);
 app.use('/comment',assignmentCommentRouter);
 app.use('/reference',Refroutes);
+app.use('/submission',Submissionrouter);
 
 // Run the job immediately on server start
 processReferences().catch(console.error);
@@ -78,6 +80,10 @@ cron.schedule('0 0 * * *', () => {
   processReferences().catch(console.error);
 });
 
+// cron.schedule('*/5 * * * * *', () => {
+//   console.log('Starting reference processing job every 5 seconds...');
+//   processReferences().catch(console.error);
+// });
 
 
 const PORT = process.env.PORT || 5000;
