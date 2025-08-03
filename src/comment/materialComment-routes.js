@@ -1,7 +1,7 @@
 import express from "express";
 
 import { authmiddleware } from "../users/user-middleware.js"; // Adjust path as needed
-import courseComment from "./courseComment.js";
+import courseComment from "./courseComment-model.js";
 import courseMaterialsModel from "../course/courseMaterials-model.js";
 
 const materialCommentRouter = express.Router();

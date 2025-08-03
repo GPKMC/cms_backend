@@ -229,7 +229,7 @@ async (req, res) => {
 // --- 7. POST in group DISCUSSION ---
 GroupAssignmentRouter.post(
   "/:id/group/:groupIdx/discussion",
-  authmiddleware,
+  authmiddleware,authorizedRole("student"),
   loadAssignmentAndGroup,
   [body("message").isString().notEmpty()],
   handleValidationErrors,
@@ -264,7 +264,7 @@ GroupAssignmentRouter.post(
 // --- 8. PATCH group PARTICIPATION/LOGSHEET ---
 GroupAssignmentRouter.patch(
   "/:id/group/:groupIdx/participation/:userId",
-  authmiddleware,
+  authmiddleware,authorizedRole("student"),
   loadAssignmentAndGroup,
   [
     param("userId").isMongoId(),
@@ -381,6 +381,7 @@ GroupAssignmentRouter.delete('/:groupAssignmentId/group/:groupId', authmiddlewar
 });
 
 // GET /group-assignment/:id
+
 GroupAssignmentRouter.get(
   "/:id",
   authmiddleware,
@@ -391,6 +392,8 @@ GroupAssignmentRouter.get(
         .populate("postedBy", "username email")
         .populate("courseInstance", "course batch")
         .populate("groups.members", "username email")
+        .populate("groups.discussion.user", "username email")   // <-- ADD THIS LINE
+        .populate("groups.participation.user", "username email")// <-- AND THIS LINE
         .populate("topic", "title");
       if (!assignment) {
         return res.status(404).json({ success: false, message: "Assignment not found" });

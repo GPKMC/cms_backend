@@ -30,6 +30,7 @@ import Refroutes from './plagiarism/refPost-routes.js';
 import cron from 'node-cron';
 import { processReferences } from './plagiarism/webiste_url_job.js';
 import Submissionrouter from './plagiarism/submission-routes.js';
+import questionCommentRouter from './comment/QuestionComment.js';
 
 
 connectDB();
@@ -68,6 +69,7 @@ app.use('/student',taskRouter);//for tasks(assignment,quiz,questions and groupAs
 
 app.use('/comment',materialCommentRouter);
 app.use('/comment',assignmentCommentRouter);
+app.use('/comment',questionCommentRouter);
 app.use('/reference',Refroutes);
 app.use('/submission',Submissionrouter);
 
