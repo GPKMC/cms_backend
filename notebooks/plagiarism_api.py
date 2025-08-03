@@ -3,7 +3,7 @@ from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 import os
-import shutil
+import tempfile
 
 app = FastAPI()
 
@@ -32,15 +32,18 @@ async def check_plagiarism_api(
     filepaths = []
     filetypes = []
 
+    # Save uploaded files as temp files (cross-platform)
     if files:
         for file in files:
-            temp_path = f"/tmp/{file.filename}"
-            with open(temp_path, "wb") as f:
-                shutil.copyfileobj(file.file, f)
+            suffix = os.path.splitext(file.filename)[1]
+            with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as temp_file:
+                temp_file.write(await file.read())
+                temp_path = temp_file.name
             filepaths.append(temp_path)
             filetypes.append(file.content_type)
 
-    result = check_plagiarism_api(
+    # Call your plagiarism checking logic
+    result = check_plagiarism(
         filepaths=filepaths,
         filetypes=filetypes,
         student_id=student_id,
@@ -48,10 +51,17 @@ async def check_plagiarism_api(
         auto_save=True
     )
 
+    # Clean up the temp files
     for path in filepaths:
-        os.remove(path)
+        try:
+            os.remove(path)
+        except Exception as e:
+            print(f"Failed to delete temp file {path}: {e}")
 
+    if not isinstance(result, dict):
+     result = {"error": "Plagiarism check did not return a valid result."}
     return JSONResponse(content=result)
+
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)

@@ -1,6 +1,6 @@
 import express from "express";
 import { authmiddleware } from "../users/user-middleware.js"; // Adjust path as needed
-import courseComment from "./courseComment.js";
+import courseComment from "./courseComment-model.js";
 import Assignment from "../assignment/assignmentModel.js"; // <-- Use your actual assignment model path
 
 const assignmentCommentRouter = express.Router();
