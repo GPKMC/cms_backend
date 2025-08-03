@@ -56,6 +56,7 @@ taskRouter.get("/feed/:courseInstanceId", async (req, res) => {
         })
           .populate("postedBy", "username role _id")
           .populate("topic", "title _id")
+            .populate("groups.members", "username _id role") 
           .lean()
           .then(items =>
             items.map(a => ({
