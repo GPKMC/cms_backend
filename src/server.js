@@ -27,10 +27,11 @@ import materialCommentRouter from './comment/materialComment-routes.js';
 import taskRouter from './student-routes/task-feed.js';
 import assignmentCommentRouter from './comment/assignmentComment-routes.js';
 import Refroutes from './plagiarism/refPost-routes.js';
-import cron from 'node-cron';
-import { processReferences } from './plagiarism/webiste_url_job.js';
-import Submissionrouter from './plagiarism/submission-routes.js';
+// import cron from 'node-cron';
+// import { processReferences } from './plagiarism/webiste_url_job.js';
+// import Submissionrouter from './plagiarism/submission-routes.js';
 import questionCommentRouter from './comment/QuestionComment.js';
+import assignmentSubmissionrouter from './assignment/assignmentSubmission-routes.js';
 
 
 connectDB();
@@ -71,16 +72,17 @@ app.use('/comment',materialCommentRouter);
 app.use('/comment',assignmentCommentRouter);
 app.use('/comment',questionCommentRouter);
 app.use('/reference',Refroutes);
-app.use('/submission',Submissionrouter);
+app.use('/submission',assignmentSubmissionrouter);
+// app.use('/submission',Submissionrouter);
 
 // Run the job immediately on server start
-processReferences().catch(console.error);
+// processReferences().catch(console.error);
 
-// Schedule job daily at midnight
-cron.schedule('0 0 * * *', () => {
-  console.log('Starting daily reference processing job...');
-  processReferences().catch(console.error);
-});
+// // Schedule job daily at midnight
+// cron.schedule('0 0 * * *', () => {
+//   console.log('Starting daily reference processing job...');
+//   processReferences().catch(console.error);
+// });
 
 // cron.schedule('*/5 * * * * *', () => {
 //   console.log('Starting reference processing job every 5 seconds...');
