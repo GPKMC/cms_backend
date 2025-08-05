@@ -18,7 +18,7 @@ const AnswerSchema = new Schema({
 });
 
 // Submission document for a student
-const SubmissionSchema = new Schema({
+const QuizSubmissionSchema = new Schema({
   quiz: {
     type: Schema.Types.ObjectId,
     ref: 'QuizQuestion',
@@ -41,4 +41,4 @@ const SubmissionSchema = new Schema({
   timestamps: true
 });
 
-export default model('Submission', SubmissionSchema);
+export default model('QuizSubmission', QuizSubmissionSchema);
