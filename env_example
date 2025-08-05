@@ -4,3 +4,5 @@ JWT_SECRET=CMS_gpcollege
 GOOGLE_CLIENT_ID=11256643343-13ptru7cj4eke5i9jsm253gi70td9f1e.apps.googleusercontent.com
 GOOGLE_CLIENT_SECRET=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
 CLIENT_URL=http://localhost:3000
+HUGGINGFACE_TOKEN = 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
+GOOGLE_APPLICATION_CREDENTIALS=c:\Users\zenit\Downloads\winter-rider-437615-e5-1f4432809731.json

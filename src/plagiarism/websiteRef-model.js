@@ -17,8 +17,12 @@ const referenceSchema = new Schema({
   volume: { type: String },
   issue: { type: String },
   pages: { type: String },
-  text: { type: String,  },
-  embedding: [{ type: Number }],
+  text: { type: String },
+  // Change embedding to array of arrays of numbers (chunk embeddings)
+  embedding: {
+    type: [[Number]],
+    default: []
+  },
   added_at: { type: Date, default: Date.now }
 });
 
