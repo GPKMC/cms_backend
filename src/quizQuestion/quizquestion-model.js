@@ -9,7 +9,7 @@ const OptionSchema = new Schema({
 // Sub‐schema for questions
 const QuestionSchema = new Schema({
   text:         { type: String, required: true },
-  type:         { type: String, enum: ['mcq','short_answer'], required: true },
+  type:         { type: String, enum: ['mcq'], required: true },
   points:       { type: Number, default: 0 },
   options:      { type: [OptionSchema], default: [] },
   correctOption: { type: String }, 
