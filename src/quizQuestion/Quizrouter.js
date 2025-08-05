@@ -16,15 +16,11 @@ function validate(req, res, next) {
   next();
 }
 
-// custom validator to ensure a date is in the future
+// ensure a date is in the future
 const isFutureDate = (value) => {
-  const then = new Date(value).getTime();
-  if (isNaN(then)) {
-    throw new Error("Invalid date format");
-  }
-  if (then <= Date.now()) {
-    throw new Error("dueDate must be in the future");
-  }
+  const ts = new Date(value).getTime();
+  if (isNaN(ts)) throw new Error("Invalid date format");
+  if (ts <= Date.now()) throw new Error("dueDate must be in the future");
   return true;
 };
 
@@ -50,7 +46,7 @@ QuizRouter.post(
         title:          req.body.title,
         description:    req.body.description,
         courseInstance: req.body.courseInstance,
-        postedBy:      req.user._id,
+        postedBy:       req.user._id,
         dueDate:        req.body.dueDate
       });
       res.status(201).json(quiz);
@@ -137,7 +133,7 @@ QuizRouter.patch(
   }
 );
 
-// ─── 5. Add a question ─────────────────────────
+// ─── 5. Add an MCQ ─────────────────────────────
 QuizRouter.post(
   "/:quizId/questions",
   authmiddleware,
@@ -145,14 +141,13 @@ QuizRouter.post(
   [
     param("quizId").isMongoId(),
     body("text").isString().notEmpty(),
-    body("type").isIn(["mcq","short_answer"]),
+    // only mcq type
+    body("type").equals("mcq").withMessage('type must be "mcq"'),
     body("points").isInt({ min: 0 }),
     body("options")
-      .if(body("type").equals("mcq"))
-      .isArray({ min: 1 })
-      .withMessage("MCQ must have at least one option"),
+      .isArray({ min: 2 })
+      .withMessage("MCQ must have at least two options"),
     body("options.*.text")
-      .if(body("type").equals("mcq"))
       .isString().notEmpty(),
     body("feedbackCorrect").optional().isString(),
     body("feedbackIncorrect").optional().isString()
@@ -165,7 +160,7 @@ QuizRouter.post(
 
       quiz.questions.push({
         text:              req.body.text,
-        type:              req.body.type,
+        type:              "mcq",
         points:            req.body.points,
         options:           req.body.options,
         feedbackCorrect:   req.body.feedbackCorrect,
@@ -237,7 +232,7 @@ QuizRouter.get(
   }
 );
 
-// ─── 8. Submit + auto-score ────────────────────
+// ─── 8. Submit + auto-score MCQ answers ─────────
 QuizRouter.post(
   "/:quizId/submit",
   authmiddleware,
@@ -246,8 +241,9 @@ QuizRouter.post(
     param("quizId").isMongoId(),
     body("answers").isArray({ min: 1 }),
     body("answers.*.question").isMongoId(),
-    body("answers.*.selectedOption").optional().isString(),
-    body("answers.*.textAnswer").optional().isString()
+    body("answers.*.selectedOption")
+      .isMongoId()
+      .withMessage("selectedOption must be a valid option ID")
   ],
   validate,
   async (req, res, next) => {
@@ -255,25 +251,21 @@ QuizRouter.post(
       const quiz = await QuizQuestion.findById(req.params.quizId);
       if (!quiz) return res.status(404).json({ message: "Quiz not found" });
 
-      // grade each answer
+      // grade each MCQ
       let total = 0;
       const graded = quiz.questions.map(q => {
         const ans = req.body.answers.find(a => a.question === String(q._id)) || {};
-        let earned = 0;
-        if (q.type === "mcq" && String(q.correctOption) === ans.selectedOption) {
-          earned = q.points;
-        }
+        const earned = String(q.correctOption) === ans.selectedOption ? q.points : 0;
         total += earned;
         return {
           question:       q._id,
           selectedOption: ans.selectedOption,
-          textAnswer:     ans.textAnswer,
           earnedPoints:   earned,
           feedback:       earned === q.points ? q.feedbackCorrect : q.feedbackIncorrect
         };
       });
 
-      // upsert submission
+      // upsert submission record
       const sub = await Submission.findOneAndUpdate(
         { quiz: quiz._id, student: req.user._id },
         {
