@@ -2,7 +2,7 @@
 import express from "express";
 import { body, param, validationResult } from "express-validator";
 import QuizQuestion from "./quizquestion-model.js";
-import Submission from "./submission-model.js";
+import Submission   from "./submission-model.js";
 import { authmiddleware, authorizedRole } from "../users/user-middleware.js";
 
 const QuizRouter = express.Router();
@@ -16,6 +16,14 @@ function validate(req, res, next) {
   next();
 }
 
+// ensure a date is in the future
+const isFutureDate = (value) => {
+  const ts = new Date(value).getTime();
+  if (isNaN(ts)) throw new Error("Invalid date format");
+  if (ts <= Date.now()) throw new Error("dueDate must be in the future");
+  return true;
+};
+
 // ─── 1. Create a quiz ─────────────────────────
 QuizRouter.post(
   "/",
@@ -25,7 +33,11 @@ QuizRouter.post(
     body("title").isString().notEmpty(),
     body("description").optional().isString(),
     body("courseInstance").isMongoId(),
-    body("dueDate").optional().isISO8601()
+    body("dueDate")
+      .optional()
+      .isISO8601().withMessage("dueDate must be a valid ISO8601 date")
+      .bail()
+      .custom(isFutureDate)
   ],
   validate,
   async (req, res, next) => {
@@ -34,7 +46,7 @@ QuizRouter.post(
         title:          req.body.title,
         description:    req.body.description,
         courseInstance: req.body.courseInstance,
-        postedBy:      req.user._id,
+        postedBy:       req.user._id,
         dueDate:        req.body.dueDate
       });
       res.status(201).json(quiz);
@@ -70,13 +82,24 @@ QuizRouter.patch(
     param("quizId").isMongoId(),
     body("title").optional().isString().notEmpty(),
     body("description").optional().isString(),
-    body("dueDate").optional().isISO8601()
+    body("dueDate")
+      .optional()
+      .isISO8601().withMessage("dueDate must be a valid ISO8601 date")
+      .bail()
+      .custom(isFutureDate)
   ],
   validate,
   async (req, res, next) => {
     try {
-      const updates = (({ title, description, dueDate }) => ({ title, description, dueDate }))(req.body);
-      const quiz = await QuizQuestion.findByIdAndUpdate(req.params.quizId, updates, { new: true });
+      const updates = (({ title, description, dueDate }) => ({
+        title, description, dueDate
+      }))(req.body);
+
+      const quiz = await QuizQuestion.findByIdAndUpdate(
+        req.params.quizId,
+        updates,
+        { new: true }
+      );
       if (!quiz) return res.status(404).json({ message: "Quiz not found" });
       res.json(quiz);
     } catch (err) {
@@ -110,7 +133,7 @@ QuizRouter.patch(
   }
 );
 
-// ─── 5. Add a question (Step 1: no correctOption) ────
+// ─── 5. Add an MCQ ─────────────────────────────
 QuizRouter.post(
   "/:quizId/questions",
   authmiddleware,
@@ -118,14 +141,13 @@ QuizRouter.post(
   [
     param("quizId").isMongoId(),
     body("text").isString().notEmpty(),
-    body("type").isIn(["mcq", "short_answer"]),
+    // only mcq type
+    body("type").equals("mcq").withMessage('type must be "mcq"'),
     body("points").isInt({ min: 0 }),
     body("options")
-      .if(body("type").equals("mcq"))
-      .isArray({ min: 1 })
-      .withMessage("MCQ must have at least one option"),
+      .isArray({ min: 2 })
+      .withMessage("MCQ must have at least two options"),
     body("options.*.text")
-      .if(body("type").equals("mcq"))
       .isString().notEmpty(),
     body("feedbackCorrect").optional().isString(),
     body("feedbackIncorrect").optional().isString()
@@ -138,15 +160,13 @@ QuizRouter.post(
 
       quiz.questions.push({
         text:              req.body.text,
-        type:              req.body.type,
+        type:              "mcq",
         points:            req.body.points,
         options:           req.body.options,
         feedbackCorrect:   req.body.feedbackCorrect,
         feedbackIncorrect: req.body.feedbackIncorrect
       });
-
       await quiz.save();
-      // return entire quiz so client can read the generated option IDs
       res.status(201).json(quiz);
     } catch (err) {
       next(err);
@@ -154,7 +174,7 @@ QuizRouter.post(
   }
 );
 
-// ─── 6. Patch correctOption (Step 2) ─────────────
+// ─── 6. Set correctOption ──────────────────────
 QuizRouter.patch(
   "/:quizId/questions/:questionId",
   authmiddleware,
@@ -162,7 +182,7 @@ QuizRouter.patch(
   [
     param("quizId").isMongoId(),
     param("questionId").isMongoId(),
-    body("correctOption").isMongoId(),       // now a real ObjectId
+    body("correctOption").isMongoId()
   ],
   validate,
   async (req, res, next) => {
@@ -182,7 +202,7 @@ QuizRouter.patch(
   }
 );
 
-// ─── 7. Submission endpoints ─────────────────────
+// ─── 7. Get-or-create submission ───────────────
 QuizRouter.get(
   "/:quizId/submission",
   authmiddleware,
@@ -212,6 +232,7 @@ QuizRouter.get(
   }
 );
 
+// ─── 8. Submit + auto-score MCQ answers ─────────
 QuizRouter.post(
   "/:quizId/submit",
   authmiddleware,
@@ -220,8 +241,9 @@ QuizRouter.post(
     param("quizId").isMongoId(),
     body("answers").isArray({ min: 1 }),
     body("answers.*.question").isMongoId(),
-    body("answers.*.selectedOption").optional().isMongoId(),
-    body("answers.*.textAnswer").optional().isString()
+    body("answers.*.selectedOption")
+      .isMongoId()
+      .withMessage("selectedOption must be a valid option ID")
   ],
   validate,
   async (req, res, next) => {
@@ -229,27 +251,27 @@ QuizRouter.post(
       const quiz = await QuizQuestion.findById(req.params.quizId);
       if (!quiz) return res.status(404).json({ message: "Quiz not found" });
 
+      // grade each MCQ
       let total = 0;
       const graded = quiz.questions.map(q => {
-        const ans = req.body.answers.find(a => a.question === String(q._id))||{};
-        let earned = 0;
-        if (q.type==="mcq" && String(q.correctOption)===ans.selectedOption) earned=q.points;
+        const ans = req.body.answers.find(a => a.question === String(q._id)) || {};
+        const earned = String(q.correctOption) === ans.selectedOption ? q.points : 0;
         total += earned;
         return {
-          question:      q._id,
+          question:       q._id,
           selectedOption: ans.selectedOption,
-          textAnswer:    ans.textAnswer,
-          earnedPoints:  earned,
-          feedback:      earned===q.points?q.feedbackCorrect:q.feedbackIncorrect
+          earnedPoints:   earned,
+          feedback:       earned === q.points ? q.feedbackCorrect : q.feedbackIncorrect
         };
       });
 
+      // upsert submission record
       const sub = await Submission.findOneAndUpdate(
         { quiz: quiz._id, student: req.user._id },
         {
-          answers: graded,
-          totalScore: total,
-          status: "submitted",
+          answers:     graded,
+          totalScore:  total,
+          status:      "submitted",
           submittedAt: new Date()
         },
         { upsert: true, new: true }

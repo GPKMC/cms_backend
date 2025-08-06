@@ -5,7 +5,7 @@ const facultySchema = new mongoose.Schema({
     type: String,
     required: true,
     trim: true,
-    unique: true, // Example: "BCA", "BBS", "BSW"
+    unique: true, 
   },
   code: {
     type: String,

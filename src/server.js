@@ -32,7 +32,7 @@ import Refroutes from './plagiarism/refPost-routes.js';
 // import Submissionrouter from './plagiarism/submission-routes.js';
 import questionCommentRouter from './comment/QuestionComment.js';
 import assignmentSubmissionrouter from './assignment/assignmentSubmission-routes.js';
-import groupAssignmentSubmissionRouter from './assignment/groupAssignmentSubmission.js';
+import QuizSubmissionrouter from './quizQuestion/submission-router.js';
 
 
 connectDB();
@@ -74,7 +74,7 @@ app.use('/comment',assignmentCommentRouter);
 app.use('/comment',questionCommentRouter);
 app.use('/reference',Refroutes);
 app.use('/submission',assignmentSubmissionrouter);
-app.use('/submission',groupAssignmentSubmissionRouter);
+app.use('/quiz-submissions', QuizSubmissionrouter);
 // app.use('/submission',Submissionrouter);
 
 // Run the job immediately on server start
