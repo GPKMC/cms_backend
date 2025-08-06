@@ -1,27 +1,21 @@
 import mongoose from 'mongoose';
 const { Schema, model } = mongoose;
 
-// Each answer within a submission
 const AnswerSchema = new Schema({
   question: {
     type: Schema.Types.ObjectId,
-    ref: 'QuizQuestion',
+    ref: 'QuizQuestion',      // ← was 'Question' or 'Quiz' before
     required: true
   },
-  selectedOption: {
-    type: Schema.Types.ObjectId,
-    ref: 'QuizQuestion.questions.options'
-  },
-  textAnswer: { type: String },
-  earnedPoints: { type: Number, default: 0 },
-  feedback: { type: String, default: '' }
+  selectedOption: { type: String, required: true },
+  earnedPoints:   { type: Number, default: 0 },
+  teacherFeedback:{ type: String, default: '' }
 });
 
-// Submission document for a student
 const QuizSubmissionSchema = new Schema({
   quiz: {
     type: Schema.Types.ObjectId,
-    ref: 'QuizQuestion',
+    ref: 'QuizQuestion',      // ← must match your quiz‐model name
     required: true
   },
   student: {
@@ -29,16 +23,13 @@ const QuizSubmissionSchema = new Schema({
     ref: 'User',
     required: true
   },
-  answers:    { type: [AnswerSchema], default: [] },
-  totalScore: { type: Number, default: 0 },
-  status: {
-    type: String,
-    enum: ['in-progress','submitted'],
-    default: 'in-progress'
-  },
-  submittedAt: { type: Date }
-}, {
-  timestamps: true
-});
+  answers:   { type: [AnswerSchema], default: [] },
+  totalScore:{ type: Number, default: 0 },
+  status:    { type: String, enum: ['in-progress','submitted'], default: 'in-progress' },
+  submittedAt: Date
+}, { timestamps: true });
+
+// ensure one per student+quiz
+QuizSubmissionSchema.index({ quiz:1, student:1 }, { unique: true });
 
 export default model('QuizSubmission', QuizSubmissionSchema);
