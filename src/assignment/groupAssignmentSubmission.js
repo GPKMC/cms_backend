@@ -11,6 +11,7 @@ import path from "path";
 import { extractTextFromFile } from '../utlis/fileExtract.js';
 import { cosineSimilarity } from '../utlis/cosine-similarity.js';
 import dotenv from "dotenv";
+import groupAssignmentModel from './groupAssignment-model.js';
 dotenv.config();
 
 const hf = new HfInference(process.env.HUGGINGFACE_TOKEN);
@@ -26,6 +27,7 @@ const upload = multer({ storage });
 
 const groupAssignmentSubmissionRouter = express.Router();
 
+// Helper: Split text into chunks
 function chunkByWords(text, wordsPerChunk = 20) {
   const words = text.split(/\s+/).filter(Boolean);
   const chunks = [];
@@ -35,10 +37,10 @@ function chunkByWords(text, wordsPerChunk = 20) {
   return chunks;
 }
 
+// Helper: Generate embeddings for all text chunks
 async function generateChunkEmbeddings(text, batchSize = 16) {
   const lines = chunkByWords(text, 20);
   const chunkEmbeddings = [];
-
   for (let i = 0; i < lines.length; i += batchSize) {
     const batchLines = lines.slice(i, i + batchSize).map(line => line.slice(0, 4096));
     try {
@@ -62,12 +64,27 @@ async function generateChunkEmbeddings(text, batchSize = 16) {
   return chunkEmbeddings;
 }
 
-/**
- * 1. Create or update a draft submission (status: "draft")
- * 2. Submit (status: "submitted") → runs plagiarism check and finalizes
- */
+// Helper: Compare chunk embeddings (cosine sim)
+function compareChunkEmbeddings(sourceChunks, targetChunks) {
+  const matches = [];
+  for (const sourceChunk of sourceChunks) {
+    for (const targetChunk of targetChunks) {
+      if (!sourceChunk.embedding || !targetChunk.embedding) continue;
+      const sim = cosineSimilarity(sourceChunk.embedding, targetChunk.embedding);
+      if (sim > 0.75) {
+        matches.push({
+          lineNumber: sourceChunk.lineNumber,
+          similarity: sim,
+          matchedText: sourceChunk.text,
+          sourceText: targetChunk.text,
+        });
+      }
+    }
+  }
+  return matches;
+}
 
-// ---------- CREATE/SAVE DRAFT (POST/PUT) ----------
+// --- MAIN ROUTE ---
 groupAssignmentSubmissionRouter.post(
   '/group-assignment-submission',
   upload.array("files"),
@@ -75,25 +92,27 @@ groupAssignmentSubmissionRouter.post(
   authorizedRole("student"),
   async (req, res) => {
     try {
-      const { groupAssignmentId, groupId, submittedBy, status = "draft" } = req.body;
-      if (!groupAssignmentId || !groupId || !submittedBy) {
-        return res.status(400).json({ error: "groupAssignmentId, groupId, and submittedBy are required." });
-      }
+      const { groupAssignmentId, groupId } = req.body;
+      const submittedBy = req.user._id;
+      const files = req.files || [];
+      let combinedText = req.body.combinedText || "";
 
-      // Only allow one draft or one submitted per group+assignment combo
+      // Prevent duplicate submission for group+assignment+student
       const existing = await groupSubmissionModel.findOne({
         groupAssignmentId,
         groupId,
-        status: status === "submitted" ? "submitted" : "draft"
+        submittedBy,
+        status: "submitted",
       });
-
       if (existing) {
-        return res.status(409).json({ error: `A submission already exists with status '${status}' for this group and assignment.` });
+        return res.status(409).json({
+          error: "You have already submitted for this group assignment.",
+          plagiarismPercentage: existing.plagiarismPercentage || 0,
+          matches: existing.plagiarismDetails || []
+        });
       }
 
-      // Prepare files & text
-      const files = req.files || [];
-      let combinedText = req.body.combinedText || "";
+      // Process files (extract text)
       const filesMeta = [];
       for (const file of files) {
         try {
@@ -115,122 +134,105 @@ groupAssignmentSubmissionRouter.post(
         }
       }
 
-      // If status is "draft", don't run plagiarism check
-      let chunkEmbeddings = [];
-      let isFlagged = false;
-      let plagiarismPercentage = 0;
-      let plagiarismDetails = [];
+      // --- Generate chunk embeddings
+      const chunkEmbeddings = await generateChunkEmbeddings(combinedText);
+      if (chunkEmbeddings.length === 0) {
+        return res.status(400).json({ error: 'Could not generate embeddings.' });
+      }
 
-      if (status === "submitted") {
-        // === RUN PLAGIARISM CHECK ===
-        chunkEmbeddings = await generateChunkEmbeddings(combinedText);
-        if (chunkEmbeddings.length === 0) {
-          return res.status(400).json({ error: 'Could not generate embeddings.' });
+      // --- FETCH ALL other group submissions (EXCEPT this user's current group submission)
+      const otherGroupSubs = await groupSubmissionModel.find({
+        _id: { $ne: undefined }, // just to ensure not current submission, adjust as needed
+        status: "submitted"
+      }).select('chunkEmbeddings groupId submittedBy combinedText groupAssignmentId');
+
+      // --- FETCH ALL assignment submissions (no restriction by assignment id)
+      const otherAssignmentSubs = await AssignmentSubmissionModel.find({
+        status: "submitted"
+      }).select('chunkEmbeddings student combinedText assignment');
+
+      // --- FETCH ALL question submissions
+      const questionSubs = await questionSubmissionModel.find({
+        status: "submitted"
+      }).select('chunkEmbeddings student answerText question');
+
+      // --- FETCH ALL references with embeddings
+      const references = await Reference.find({ embedding: { $exists: true, $ne: [] } }).select('embedding title type text');
+
+      // --- PLAGIARISM CHECK
+      let matches = [];
+
+      // Compare with all other group submissions
+      for (const sub of otherGroupSubs) {
+        if (!sub.chunkEmbeddings) continue;
+        const subMatches = compareChunkEmbeddings(chunkEmbeddings, sub.chunkEmbeddings);
+        if (subMatches.length > 0) {
+          matches.push({
+            type: 'group-assignment-submission',
+            sourceId: sub._id,
+            matchedGroup: {
+              _id: sub.groupId?._id || sub.groupId,
+              name: sub.groupId?.name,
+            },
+            matchedStudent: {
+              _id: sub.submittedBy?._id || sub.submittedBy,
+              username: sub.submittedBy?.username,
+            },
+            assignment: sub.groupAssignmentId,
+            matches: subMatches,
+          });
         }
+      }
 
-        // === Compare with all other sources ===
-        const otherAssignmentSubs = await AssignmentSubmissionModel.find({ assignment: groupAssignmentId })
-          .select('chunkEmbeddings student combinedText assignment')
-          .populate('student', 'username');
-
-        const groupSubs = await groupSubmissionModel.find({
-          groupAssignmentId,
-          groupId: { $ne: groupId },
-          status: "submitted"
-        })
-          .select('chunkEmbeddings groupId submittedBy combinedText groupAssignmentId')
-          .populate('groupId', 'name')
-          .populate('submittedBy', 'username');
-
-        const questionSubs = await questionSubmissionModel.find()
-          .select('chunkEmbeddings student answerText question')
-          .populate('student', 'username');
-
-        const references = await Reference.find({ embedding: { $exists: true, $ne: [] } }).select('embedding title type text');
-
-        // --- Plagiarism check
-        function compareChunkEmbeddings(sourceChunks, targetChunks) {
-          const matches = [];
-          for (const sourceChunk of sourceChunks) {
-            for (const targetChunk of targetChunks) {
-              if (!sourceChunk.embedding || !targetChunk.embedding) continue;
-              const sim = cosineSimilarity(sourceChunk.embedding, targetChunk.embedding);
-              if (sim > 0.75) {
-                matches.push({
-                  lineNumber: sourceChunk.lineNumber,
-                  similarity: sim,
-                  matchedText: sourceChunk.text,
-                  sourceText: targetChunk.text,
-                });
-              }
-            }
-          }
-          return matches;
+      // Compare with all other assignment submissions
+      for (const sub of otherAssignmentSubs) {
+        if (!sub.chunkEmbeddings) continue;
+        const subMatches = compareChunkEmbeddings(chunkEmbeddings, sub.chunkEmbeddings);
+        if (subMatches.length > 0) {
+          matches.push({
+            type: 'assignment-submission',
+            sourceId: sub._id,
+            matchedStudent: sub.student,
+            assignment: sub.assignment,
+            matches: subMatches,
+          });
         }
+      }
 
-        let matches = [];
+      // Compare with all question submissions
+      for (const sub of questionSubs) {
+        if (!sub.chunkEmbeddings) continue;
+        const subMatches = compareChunkEmbeddings(chunkEmbeddings, sub.chunkEmbeddings);
+        if (subMatches.length > 0) {
+          matches.push({
+            type: 'question-submission',
+            sourceId: sub._id,
+            matchedStudent: sub.student,
+            question: sub.question,
+            matches: subMatches,
+          });
+        }
+      }
 
-        for (const sub of otherAssignmentSubs) {
-          if (!sub.chunkEmbeddings) continue;
-          const subMatches = compareChunkEmbeddings(chunkEmbeddings, sub.chunkEmbeddings);
-          if (subMatches.length > 0) {
+      // If no matches, check references
+      if (matches.length === 0) {
+        for (const ref of references) {
+          if (!ref.embedding) continue;
+          const refMatches = compareChunkEmbeddings(chunkEmbeddings, ref.embedding);
+          if (refMatches.length > 0) {
             matches.push({
-              type: 'assignment-submission',
-              sourceId: sub._id,
-              matchedStudent: { _id: sub.student._id, username: sub.student.username },
-              assignment: sub.assignment,
-              matches: subMatches,
+              type: 'reference',
+              sourceId: ref._id,
+              referenceTitle: ref.title,
+              matches: refMatches,
             });
           }
         }
+      }
 
-        for (const sub of groupSubs) {
-          if (!sub.chunkEmbeddings) continue;
-          const subMatches = compareChunkEmbeddings(chunkEmbeddings, sub.chunkEmbeddings);
-          if (subMatches.length > 0) {
-            matches.push({
-              type: 'group-assignment-submission',
-              sourceId: sub._id,
-              matchedGroup: { _id: sub.groupId._id, name: sub.groupId.name },
-              matchedStudent: { _id: sub.submittedBy._id, username: sub.submittedBy.username },
-              assignment: sub.groupAssignmentId,
-              matches: subMatches,
-            });
-          }
-        }
-
-        for (const sub of questionSubs) {
-          if (!sub.chunkEmbeddings) continue;
-          const subMatches = compareChunkEmbeddings(chunkEmbeddings, sub.chunkEmbeddings);
-          if (subMatches.length > 0) {
-            matches.push({
-              type: 'question-submission',
-              sourceId: sub._id,
-              matchedStudent: { _id: sub.student._id, username: sub.student.username },
-              question: sub.question,
-              matches: subMatches,
-            });
-          }
-        }
-
-        // Reference
-        if (matches.length === 0) {
-          for (const ref of references) {
-            if (!ref.embedding) continue;
-            const refMatches = compareChunkEmbeddings(chunkEmbeddings, ref.embedding);
-            if (refMatches.length > 0) {
-              matches.push({
-                type: 'reference',
-                sourceId: ref._id,
-                referenceTitle: ref.title,
-                matches: refMatches,
-              });
-            }
-          }
-        }
-
-        // --- Max sim
-        let maxSimilarity = 0;
+      // --- Calculate plagiarism percentage (max similarity)
+      let maxSimilarity = 0;
+      if (Array.isArray(matches)) {
         matches.forEach(matchGroup => {
           if (matchGroup && Array.isArray(matchGroup.matches)) {
             matchGroup.matches.forEach(m => {
@@ -240,23 +242,20 @@ groupAssignmentSubmissionRouter.post(
             });
           }
         });
+      }
+      const plagiarismPercentage = maxSimilarity * 100;
 
-        plagiarismPercentage = maxSimilarity * 100;
-        isFlagged = plagiarismPercentage > 0;
-        plagiarismDetails = matches;
-
-        if (plagiarismPercentage >= 30) {
-          return res.status(200).json({
-            status: "PLAGIARIZED",
-            message: `Submission rejected. Plagiarism detected at ${plagiarismPercentage.toFixed(2)}%.`,
-            plagiarismPercentage,
-            matches,
-            accepted: false
-          });
-        }
+      if (plagiarismPercentage >= 30) {
+        return res.status(200).json({
+          status: "PLAGIARIZED",
+          message: `Submission rejected. Plagiarism detected at ${plagiarismPercentage.toFixed(2)}%.`,
+          plagiarismPercentage,
+          matches,
+          accepted: false
+        });
       }
 
-      // --- Save new (draft or submitted)
+      // --- Save submission
       const submissionDoc = new groupSubmissionModel({
         groupAssignmentId,
         groupId,
@@ -264,22 +263,20 @@ groupAssignmentSubmissionRouter.post(
         files: filesMeta,
         combinedText,
         chunkEmbeddings,
-        isFlagged,
+        isFlagged: plagiarismPercentage > 0,
         plagiarismPercentage,
-        plagiarismDetails,
+        plagiarismDetails: matches,
         submittedAt: new Date(),
-        status :"submitted"
+        status: "submitted"
       });
 
       await submissionDoc.save();
 
       return res.status(201).json({
-        status: status === "submitted" ? "ACCEPTED" : "DRAFT",
+        status: "ACCEPTED",
         plagiarismPercentage,
-        matches: plagiarismDetails,
-        message: status === "submitted"
-          ? "Group submission saved and checked for plagiarism."
-          : "Draft saved.",
+        matches,
+        message: "Group assignment submission saved and checked for plagiarism.",
         submission: submissionDoc,
       });
 
@@ -289,6 +286,8 @@ groupAssignmentSubmissionRouter.post(
     }
   }
 );
+
+
 
 // --- PATCH to update draft and submit ---
 groupAssignmentSubmissionRouter.patch(
@@ -379,26 +378,68 @@ groupAssignmentSubmissionRouter.patch(
   }
 );
 
-// --- DELETE (unsubmit) --- (same as before)
-groupAssignmentSubmissionRouter.delete('/:submissionId/unsubmit', authmiddleware, authorizedRole("student"), async (req, res) => {
-  try {
-    const { submissionId } = req.params;
-    const userId = req.user._id;
+// --- DELETE (unsubmit) --- (same as before
+groupAssignmentSubmissionRouter.delete('/:submissionId/unsubmit',
+  authmiddleware,
+  authorizedRole("student"),
+  async (req, res) => {
+    try {
+      const { submissionId } = req.params;
+      const userId = req.user._id;
 
-    const submission = await groupSubmissionModel.findById(submissionId);
-    if (!submission) {
-      return res.status(404).json({ error: 'Submission not found.' });
+      // --- Logging for debug ---
+      console.log('DELETE group assignment submission:', { submissionId, userId });
+
+      // --- Find the submission ---
+      const submission = await groupSubmissionModel.findById(submissionId);
+      if (!submission) {
+        console.log('❌ Submission not found for ID:', submissionId);
+        return res.status(404).json({ error: 'Submission not found.' });
+      }
+      console.log('✅ Submission found:', submission._id);
+
+      // --- Find the related group assignment ---
+      const groupAssignment = await groupAssignmentModel.findById(submission.groupAssignmentId);
+      if (!groupAssignment) {
+        console.log('❌ GroupAssignment not found for ID:', submission.groupAssignmentId);
+        return res.status(404).json({ error: 'Group assignment not found.' });
+      }
+      console.log('✅ GroupAssignment found:', groupAssignment._id);
+
+      // --- Find group in assignment ---
+      const group = groupAssignment.groups.find(
+        g =>
+          (g._id?.toString?.() === submission.groupId?.toString?.()) ||
+          (g.id?.toString?.() === submission.groupId?.toString?.())
+      );
+      if (!group) {
+        console.log('❌ Group not found in assignment. Submission groupId:', submission.groupId);
+        return res.status(404).json({ error: 'Group not found in assignment.' });
+      }
+      console.log('✅ Group found:', group.name || group._id);
+
+      // --- Check if user is in group.members ---
+      const isMember = (group.members || []).some(
+        m => m.toString() === userId.toString()
+      );
+      if (!isMember) {
+        console.log('❌ User is not a member of this group:', userId);
+        return res.status(403).json({ error: 'You are not authorized to unsubmit this assignment.' });
+      }
+      console.log('✅ User is authorized to unsubmit.');
+
+      // --- Perform deletion ---
+      await groupSubmissionModel.deleteOne({ _id: submissionId });
+      console.log('✅ Submission deleted:', submissionId);
+
+      return res.status(200).json({ message: 'Submission unsubmitted (deleted) successfully.' });
+
+    } catch (err) {
+      console.error('❌ Error in group assignment submission DELETE:', err);
+      return res.status(500).json({ error: 'Internal server error.' });
     }
-    if (submission.submittedBy.toString() !== userId.toString()) {
-      return res.status(403).json({ error: 'You are not authorized to unsubmit this assignment.' });
-    }
-    await groupSubmissionModel.deleteOne({ _id: submissionId });
-    return res.status(200).json({ message: 'Submission unsubmitted (deleted) successfully.' });
-  } catch (err) {
-    console.error(err);
-    return res.status(500).json({ error: 'Internal server error.' });
   }
-});
+);
 
 // --- GET by ID --- (unchanged)
 groupAssignmentSubmissionRouter.get('/:submissionId', authmiddleware, authorizedRole("student"), async (req, res) => {
