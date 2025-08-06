@@ -1,43 +1,59 @@
 import mongoose from "mongoose";
 const { Schema } = mongoose;
 
-// Plagiarism match schema
-const plagiarismMatchSchema = new Schema({
-  type: { type: String, enum: ['submission', 'reference'], required: true },
-  referenceId: { type: Schema.Types.ObjectId, ref: 'Reference' },
-  studentId: { type: Schema.Types.ObjectId, ref: 'User' }, // for this submission
-  matchedGroupId: { type: Schema.Types.ObjectId, ref: 'Group' },
-  matchedStudentId: { type: Schema.Types.ObjectId, ref: 'User' },
-  similarity: { type: Number, required: true },
-  matchedText: { type: String, required: true },
-  lineNumber: Number,
-  startCharIndex: Number,
-  endCharIndex: Number
+// --- File Schema ---
+const fileSchema = new Schema({
+  url:           { type: String, required: true },
+  originalname:  { type: String, required: true },
+  filetype:      { type: String, required: true },
+  extractedText: { type: String, default: '' },
 }, { _id: false });
 
-// Main submission schema
+// --- Chunk Embedding Schema ---
+const chunkEmbeddingSchema = new Schema({
+  text:      { type: String, required: true },
+  embedding: [{ type: Number, required: true }],
+  lineNumber:{ type: Number, required: true },
+}, { _id: false });
+
+// --- Plagiarism Detail Schema ---
+const plagiarismDetailSchema = new Schema({
+  sourceType:     { type: String, enum: ['submission', 'reference'], required: true },
+  sourceId:       { type: Schema.Types.ObjectId, required: true, refPath: 'plagiarismDetails.sourceType' },
+  similarity:     { type: Number, required: true },
+  matchedText:    { type: String, required: true },
+  lineNumber:     { type: Number },
+  matchedStudent: { type: Schema.Types.ObjectId, ref: 'User' },    // For matched submission
+  matchedGroup:   { type: Schema.Types.ObjectId, ref: 'Group' },   // For matched group
+}, { _id: false });
+
+// --- Main Group Assignment Submission Schema ---
 const groupAssignmentSubmissionSchema = new Schema({
   groupAssignmentId: { type: Schema.Types.ObjectId, ref: "GroupAssignment", required: true },
-  groupId:           { type: Schema.Types.ObjectId, required: true }, // Refers to groups._id in GroupAssignment
-
+  groupId:           { type: Schema.Types.ObjectId, ref: "Group", required: true },
   submittedBy:       { type: Schema.Types.ObjectId, ref: "User", required: true },
-  files:             [{
-    url: String,
-    originalname: String,
-    filetype: String,
-    extractedText: String,
-  }],
-  combinedText:         { type: String, default: '' },
-  embedding:            [{ type: Number }],
-  isFlagged:            { type: Boolean, default: false },
+  files:             [fileSchema],
+  combinedText:      { type: String, default: '' },
+  embedding:         [{ type: Number }],
+  chunkEmbeddings:   [chunkEmbeddingSchema],
+
+  isFlagged:         { type: Boolean, default: false },
   plagiarismPercentage: { type: Number, default: 0 },
-  plagiarismMatches:    [plagiarismMatchSchema],
+  plagiarismDetails: [plagiarismDetailSchema],
 
-  submittedAt: { type: Date, default: Date.now },
+  submittedAt:       { type: Date, default: Date.now },
 
-  feedback: { type: String },
-  grade:    { type: Number }
+  feedback:          { type: String },
+  grade:             { type: Number, default: null },
+
+  // <-- Add this line:
+  status: { 
+    type: String, 
+    enum: ["draft", "submitted"], 
+    default: "draft" 
+  },
 });
+
 
 export default mongoose.models.GroupAssignmentSubmission ||
   mongoose.model("GroupAssignmentSubmission", groupAssignmentSubmissionSchema);
