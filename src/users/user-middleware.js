@@ -17,7 +17,7 @@ export const authmiddleware = (req, res, next) => {
       _id: userInfo._id || userInfo.id,
     };
 
-    console.log('✅ Authenticated user:', req.user);
+    // console.log('✅ Authenticated user:', req.user);
     next();
   } catch (err) {
     return res.status(401).json({ message: 'Invalid token' });

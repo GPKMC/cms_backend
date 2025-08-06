@@ -305,15 +305,22 @@ StudentRoutes.get(
     updatedAt: q.updatedAt,
     postedBy: q.postedBy,
   })),
-  ...groupAssignments.map(g => ({
-    _id: g._id,
-    type: "groupAssignment",
-    title: g.title,
-    content: g.content,      // Or .description if your model uses that
-    createdAt: g.createdAt,
-    updatedAt: g.updatedAt,
-    postedBy: g.postedBy,
-  })),
+ ...groupAssignments.map(g => ({
+  _id: g._id,
+  type: "groupAssignment",
+  title: g.title,
+  content: g.content,
+  createdAt: g.createdAt,
+  updatedAt: g.updatedAt,
+  postedBy: g.postedBy,
+  groups: g.groups, // <---- Include this line!
+  // Optionally, also send media, documents, links, youtubeLinks, etc.
+  media: g.media,
+  documents: g.documents,
+  links: g.links,
+  youtubeLinks: g.youtubeLinks,
+}))
+,
 ];
 
 

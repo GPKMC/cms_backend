@@ -122,8 +122,7 @@ assignmentSubmissionrouter.post(
         return res.status(400).json({ error: 'Could not generate embeddings.' });
       }
 
-    const otherSubmissions = await AssignmentSubmissionModel.find({
-  assignment,
+const otherSubmissions = await AssignmentSubmissionModel.find({
   student: { $ne: student }
 })
   .select('chunkEmbeddings student combinedText assignment')
