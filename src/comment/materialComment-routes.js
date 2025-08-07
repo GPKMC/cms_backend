@@ -1,8 +1,11 @@
 import express from "express";
 
-import { authmiddleware } from "../users/user-middleware.js"; // Adjust path as needed
+import { authmiddleware, authorizedRole } from "../users/user-middleware.js"; // Adjust path as needed
 import courseComment from "./courseComment-model.js";
 import courseMaterialsModel from "../course/courseMaterials-model.js";
+import notificationModel from "../functions/notification-model.js";
+import CourseInstance from "../course/courseinstance-model.js";
+import User from "../users/user-model.js";
 
 const materialCommentRouter = express.Router();
 
@@ -33,54 +36,118 @@ materialCommentRouter.get("/material-comments/:materialId", async (req, res) => 
  * Body: { content: string }
  * Authenticated users only
  */
-materialCommentRouter.post("/material-comments/:materialId", authmiddleware, async (req, res) => {
-  try {
-    const { materialId } = req.params;
-    const { content } = req.body;
-    const userId = req.user._id;
+// TOP OF FILE!
+// At the top of your file
 
-    // Fetch the material's comment settings
-    const material = await courseMaterialsModel.findById(materialId).select(
-      "commentsDisabled mutedStudents courseInstance"
-    );
+materialCommentRouter.post(
+  "/material-comments/:materialId",
+  authmiddleware,
+  authorizedRole("teacher", "student"),
+  async (req, res) => {
+    try {
+      const { materialId } = req.params;
+      const { content } = req.body;
+      const userId = req.user._id;
 
-    if (!material) {
-      return res.status(404).json({ message: "Material not found." });
-    }
+      console.log("materialId:", materialId);
+      console.log("userId:", userId);
+      console.log("content:", content);
 
-    // Comments disabled?
-    if (material.commentsDisabled) {
-      return res.status(403).json({ message: "Comments are disabled for this material." });
-    }
+      // Fetch material info (with visibleTo, postedBy, courseInstance, title)
+      const material = await courseMaterialsModel.findById(materialId).select(
+        "title commentsDisabled mutedStudents courseInstance postedBy visibleTo"
+      );
+      console.log("material found:", material);
 
-    // Muted for this material?
-    if (
-      Array.isArray(material.mutedStudents) &&
-      material.mutedStudents.map(id => String(id)).includes(String(userId))
-    ) {
-      return res.status(403).json({ message: "You are muted for this material." });
-    }
+      if (!material) {
+        console.log("Material not found.");
+        return res.status(404).json({ message: "Material not found." });
+      }
+      if (material.commentsDisabled) {
+        console.log("Comments are disabled for this material.");
+        return res.status(403).json({ message: "Comments are disabled for this material." });
+      }
+      if (
+        Array.isArray(material.mutedStudents) &&
+        material.mutedStudents.map(id => String(id)).includes(String(userId))
+      ) {
+        console.log("You are muted for this material.");
+        return res.status(403).json({ message: "You are muted for this material." });
+      }
 
-    // Create comment
-    const newComment = await courseComment.create({
-      content,
-      courseInstance: material.courseInstance,
-      type: "material",
-      contentId: materialId,
-      postedBy: userId,
-    });
+      // Create comment
+      const newComment = await courseComment.create({
+        content,
+        courseInstance: material.courseInstance,
+        type: "material",
+        contentId: materialId,
+        postedBy: userId,
+      });
+      await newComment.populate("postedBy", "username email");
+      console.log("newComment created:", newComment);
 
-    // Populate for response
-    await newComment.populate("postedBy", "username email");
+      // ----- NOTIFICATION LOGIC -----
+      let recipients = [];
 
-    res.status(201).json({
-      message: "Comment posted!",
-      comment: newComment,
-    });
-  } catch (err) {
-    res.status(500).json({ message: err.message });
+// Notify material poster (teacher), unless it's the commenter
+if (
+  material.postedBy &&
+  String(material.postedBy) !== String(userId)
+) {
+  recipients.push(String(material.postedBy));
+}
+
+// Get all students if visibleTo is empty, else only visibleTo
+if (!material.visibleTo || material.visibleTo.length === 0) {
+  // Get the courseInstance and its batch
+  const courseInstance = await CourseInstance.findById(material.courseInstance).select("batch");
+  if (courseInstance) {
+    // Fetch all students in that batch
+    const students = await User.find({
+      role: "student",
+      batch: courseInstance.batch,
+    }).select("_id");
+    recipients = [
+      ...recipients,
+      ...students
+        .filter((stu) => String(stu._id) !== String(userId))
+        .map((stu) => String(stu._id)),
+    ];
   }
-});
+} else {
+  // Only notify visibleTo students except commenter
+  recipients = material.visibleTo
+    .map(uid => String(uid))
+    .filter(uid => uid !== String(userId));
+}
+
+// Only create notification if someone to notify
+if (recipients.length > 0) {
+  await notificationModel.create({
+    courseInstance: material.courseInstance,
+    type: "comment",
+    refId: newComment._id,
+    title: "New comment on material",
+    message: `${newComment.postedBy?.username || "Someone"} commented on material "${material.title || ""}": "${newComment.content.slice(0, 60)}..."`,
+    createdBy: userId,
+    recipients,
+  });
+}
+
+      res.status(201).json({
+        message: "Comment posted!",
+        comment: newComment,
+      });
+    } catch (err) {
+      console.error("Error in material-comments route:", err);
+      res.status(500).json({ message: err.message });
+    }
+  }
+);
+
+
+
+
 /**
  * Update (edit) a material comment
  * PATCH /api/material-comments/:commentId

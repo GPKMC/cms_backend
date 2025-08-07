@@ -2,7 +2,9 @@ import express from "express";
 import { authmiddleware, authorizedRole } from "../users/user-middleware.js";
 import upload from "../utlis/multer-config.js";
 import Assignment from "./assignmentModel.js";
-
+import CourseInstance from "../course/courseinstance-model.js";
+import Notification from "../functions/notification-model.js"
+import User from "../users/user-model.js";
 const AssignmentRouter = express.Router();
 
 // Helper to generate file URLs
@@ -19,7 +21,7 @@ function makeFileUrls(files) {
 }
 
 
-// CREATE: POST /assignment
+// CREATE: POST /assignment with notification
 AssignmentRouter.post(
   "/",
   upload.fields([
@@ -33,8 +35,11 @@ AssignmentRouter.post(
       const mediaFiles = req.files?.media || [];
       const documentFiles = req.files?.documents || [];
 
+      // Parse potentially stringified arrays safely
       const links = req.body.links ? JSON.parse(req.body.links) : [];
       const youtubeLinks = req.body.youtubeLinks ? JSON.parse(req.body.youtubeLinks) : [];
+      const mutedStudents = req.body.mutedStudents ? JSON.parse(req.body.mutedStudents) : [];
+      const visibleTo = req.body.visibleTo ? JSON.parse(req.body.visibleTo) : [];
 
       const newAssignment = await Assignment.create({
         title: req.body.title,
@@ -47,11 +52,40 @@ AssignmentRouter.post(
         links,
         youtubeLinks,
         commentsDisabled: req.body.commentsDisabled === "true",
-        mutedStudents: req.body.mutedStudents ? JSON.parse(req.body.mutedStudents) : [],
-        visibleTo: req.body.visibleTo ? JSON.parse(req.body.visibleTo) : [],
+        mutedStudents,
+        visibleTo,
         dueDate: req.body.dueDate,
         points: req.body.points,
       });
+
+      // --------------- NOTIFICATION LOGIC -----------------
+      let recipients = [];
+      if (visibleTo.length > 0) {
+        recipients = visibleTo;
+      } else {
+        // Find all students in this batch
+        const courseInstance = await CourseInstance.findById(req.body.courseInstance);
+        if (!courseInstance) {
+          return res.status(400).json({ error: "Invalid courseInstance" });
+        }
+        const batchStudents = await User.find({
+          role: "student",
+          batch: courseInstance.batch
+        }).select('_id');
+        recipients = batchStudents.map(s => s._id);
+      }
+
+      await Notification.create({
+        courseInstance: req.body.courseInstance,
+        type: "assignment",
+        refId: newAssignment._id,
+        title: newAssignment.title,
+        message: `New assignment posted: ${newAssignment.title}`,
+        createdBy: req.user._id,
+        recipients,
+      });
+      // ----------------------------------------------------
+
       res.status(201).json({ assignment: newAssignment });
     } catch (err) {
       res.status(500).json({ error: err.message });

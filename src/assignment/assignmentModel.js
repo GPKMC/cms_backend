@@ -7,14 +7,14 @@ const assignmentSchema = new Schema({
   postedBy: { type: Schema.Types.ObjectId, ref: "User", required: true }, // Teacher
   courseInstance: { type: Schema.Types.ObjectId, ref: "CourseInstance", required: true },
   topic: { type: Schema.Types.ObjectId, ref: "Topic" },
- documents: [{
-  url: String,
-  originalname: String,
-}],
-media: [{
-  url: String,
-  originalname: String,
-}],   
+  documents: [{
+    url: String,
+    originalname: String,
+  }],
+  media: [{
+    url: String,
+    originalname: String,
+  }],
   links: [String],          // Any external links
   youtubeLinks: [String],   // YouTube embed links
   commentsDisabled: { type: Boolean, default: false },

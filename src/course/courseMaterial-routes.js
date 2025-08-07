@@ -3,6 +3,9 @@ import mongoose from "mongoose";
 import { authmiddleware, authorizedRole } from "../users/user-middleware.js";
 import upload from "../utlis/multer-config.js";
 import CourseMaterial from "./courseMaterials-model.js";
+import CourseInstance from "./courseinstance-model.js";
+import notificationModel from "../functions/notification-model.js";
+import User from "../users/user-model.js";
 
 const CourseMaterialRouter = express.Router();
 
@@ -38,7 +41,7 @@ CourseMaterialRouter.post(
       const youtubeLinks = req.body.youtubeLinks ? JSON.parse(req.body.youtubeLinks) : [];
 
       const newMaterial = await CourseMaterial.create({
-        title: req.body.title,    // Title field added here!
+        title: req.body.title,
         content: req.body.content,
         postedBy: req.user._id,
         courseInstance: req.body.courseInstance,
@@ -51,14 +54,44 @@ CourseMaterialRouter.post(
         mutedStudents: req.body.mutedStudents ? JSON.parse(req.body.mutedStudents) : [],
         visibleTo: req.body.visibleTo ? JSON.parse(req.body.visibleTo) : [],
       });
+
+      // --- Notification logic here ---
+
+      // 1. Find recipients (visibleTo has priority, else all students in batch)
+      let recipients = [];
+      if (Array.isArray(newMaterial.visibleTo) && newMaterial.visibleTo.length > 0) {
+        recipients = newMaterial.visibleTo.map(id => id.toString());
+      } else {
+        // Find the courseInstance, then its batch, then all students in that batch
+        const courseInstance = await CourseInstance.findById(newMaterial.courseInstance);
+        if (courseInstance) {
+          const batchStudents = await User.find({
+            role: "student",
+            batch: courseInstance.batch,
+          }).select("_id");
+          recipients = batchStudents.map(s => s._id.toString());
+        }
+      }
+
+      // 2. Create notification
+      if (recipients.length > 0) {
+        await notificationModel.create({
+          courseInstance: newMaterial.courseInstance,
+          type: "material",
+          refId: newMaterial._id,
+          title: newMaterial.title,
+          message: `New material posted: ${newMaterial.title}`,
+          createdBy: req.user._id,
+          recipients,
+        });
+      }
+
       res.status(201).json({ material: newMaterial });
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
   }
 );
-
-// routes/courseMaterials.js
 // routes/courseMaterials.js
 
 CourseMaterialRouter.get("/material/:id",

@@ -3,7 +3,6 @@ import { HfInference } from '@huggingface/inference';
 import AssignmentSubmissionModel from './AssignmentSubmission-model.js';
 import Reference from '../plagiarism/websiteRef-model.js';
 import questionSubmissionModel from '../question/questionSubmission-model.js';
-import groupSubmission from './groupSubmission-model.js';
 import { authmiddleware, authorizedRole } from '../users/user-middleware.js';
 import multer from 'multer';
 import fsExtra from "fs-extra";
@@ -11,6 +10,7 @@ import path from "path";
 import { extractTextFromFile } from '../utlis/fileExtract.js';
 import { cosineSimilarity } from '../utlis/cosine-similarity.js';
 import dotenv from "dotenv";
+import groupSubmissionModel from './groupSubmission-model.js';
 dotenv.config();
 const hf = new HfInference(process.env.HUGGINGFACE_TOKEN);
 
@@ -142,12 +142,12 @@ const otherSubmissions = await AssignmentSubmissionModel.find({
 
       console.log("Other assignment submissions fetched for plagiarism check:", otherSubmissions.length);
 
-    const groupSubmissions = await groupSubmission.find()
-  .select('chunkEmbeddings groupId submittedBy combinedText assignment')
-  .populate('groupId', 'name')
+    const groupSubmissions = await groupSubmissionModel.find()
+  .select('chunkEmbeddings groupId submittedBy combinedText groupAssignmentId')
+  // .populate('groupId', 'name')
   .populate('submittedBy', 'username')
   .populate({
-    path: 'assignment',
+    path: 'groupAssignmentId',
     select: 'title courseInstance',
     populate: {
       path: 'courseInstance',
@@ -224,7 +224,7 @@ const questionSubmissions = await questionSubmissionModel.find()
 }
       console.log("Assignment submission plagiarism match groups:", matches.length);
 
-  for (const sub of groupSubmissions) {
+for (const sub of groupSubmissions) {
   if (!sub.chunkEmbeddings) continue;
   const subMatches = compareChunkEmbeddings(chunkEmbeddings, sub.chunkEmbeddings);
   if (subMatches.length > 0) {
@@ -234,15 +234,16 @@ const questionSubmissions = await questionSubmissionModel.find()
       matchedGroup: { _id: sub.groupId._id, name: sub.groupId.name },
       matchedStudent: { _id: sub.submittedBy._id, username: sub.submittedBy.username },
       assignment: {
-        _id: sub.assignment._id,
-        title: sub.assignment.title,
-        courseName: sub.assignment.courseInstance?.course?.name,
-        courseCode: sub.assignment.courseInstance?.course?.code,
+        _id: sub.groupAssignmentId?._id,
+        title: sub.groupAssignmentId?.title,
+        courseName: sub.groupAssignmentId?.courseInstance?.course?.name,
+        courseCode: sub.groupAssignmentId?.courseInstance?.course?.code,
       },
       matches: subMatches,
     });
   }
 }
+
       console.log("After group submissions check, total match groups:", matches.length);
 
  for (const sub of questionSubmissions) {

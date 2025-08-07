@@ -3,6 +3,9 @@ import mongoose from "mongoose";
 import CourseAnnouncement from "./courseAnnouncement-model.js";
 import { authmiddleware, authorizedRole } from "../users/user-middleware.js";
 import upload from "../utlis/multer-config.js";
+import CourseInstance from "./courseinstance-model.js";
+import User from "../users/user-model.js";
+import notificationModel from "../functions/notification-model.js";
 
 const CourseAnnouncementrouter = express.Router();
 
@@ -35,7 +38,7 @@ function categorizeLinks(allLinks) {
   return { youtubeLinks, links };
 }
 
-// POST: Create new announcement
+
 CourseAnnouncementrouter.post(
   "/course-announcement",
   upload.any(),
@@ -65,12 +68,44 @@ CourseAnnouncementrouter.post(
       };
 
       const announcement = await CourseAnnouncement.create(announcementData);
+
+      // --------- NOTIFICATION LOGIC STARTS HERE ---------
+      let recipients = [];
+      if (announcement.visibleTo && announcement.visibleTo.length > 0) {
+        recipients = announcement.visibleTo.map(id => id.toString());
+      } else {
+        // Get all students from the batch via courseInstance if visibleTo not specified
+        const courseInstance = await CourseInstance.findById(announcement.courseInstance);
+        if (courseInstance) {
+          const batchStudents = await User.find({
+            role: "student",
+            batch: courseInstance.batch,
+          }).select("_id");
+          recipients = batchStudents.map(s => s._id.toString());
+        }
+      }
+
+      // Only create notification if there's someone to notify
+      if (recipients.length > 0) {
+        await notificationModel.create({
+          courseInstance: announcement.courseInstance,
+          type: "announcement",
+          refId: announcement._id,
+          title: "New Course Announcement",
+          message: "A new announcement has been posted.",
+          createdBy: req.user._id,
+          recipients,
+        });
+      }
+      // --------- NOTIFICATION LOGIC ENDS HERE ---------
+
       res.status(201).json({ announcement });
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
   }
 );
+
 
 // GET: All announcements for a course instance (categorized)
 CourseAnnouncementrouter.get(

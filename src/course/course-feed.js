@@ -1,13 +1,4 @@
-import mongoose from "mongoose";
-import express from "express";
-import { authmiddleware, authorizedRole } from "../users/user-middleware.js";
-import topicModel from "./topic-model.js";
 
-import courseMaterialsModel from "./courseMaterials-model.js";
-import questionModel from "../question/question-model.js";
-import Assignment from "../assignment/assignmentModel.js";
-
-const FeedRouter = express.Router();
 
 // FeedRouter.get(
 //   "/:courseInstanceId",
@@ -110,22 +101,10 @@ const FeedRouter = express.Router();
 
 // export default FeedRouter;
 
-import groupAssignmentModel from "../assignment/groupAssignment-model.js";
 // import assignmentModel from "../assignment/assignmentModel.js";
 
 // const FeedRouter = express.Router();
 
-// Helper to bucket Materials / Assignments / Questions
-function bucket(items, arrName, topicMap, uncategorized) {
-  items.forEach(item => {
-    const tid = item.topic?.toString();
-    if (tid && topicMap[tid]) {
-      topicMap[tid][arrName].push(item);
-    } else {
-      uncategorized[arrName].push(item);
-    }
-  });
-}
 
 // Helper to bucket GroupAssignments, handling global vs per‑group overrides
 // function bucketGroupAssignments(groupAssignments, arrName, topicMap, uncategorized) {
@@ -191,22 +170,44 @@ function bucket(items, arrName, topicMap, uncategorized) {
 //     }
 //   });
 // }
+import mongoose from "mongoose";
+import express from "express";
+import { authmiddleware, authorizedRole } from "../users/user-middleware.js";
+import topicModel from "./topic-model.js";
+
+import courseMaterialsModel from "./courseMaterials-model.js";
+import questionModel from "../question/question-model.js";
+import Assignment from "../assignment/assignmentModel.js";
+
+const FeedRouter = express.Router();
+import groupAssignmentModel from "../assignment/groupAssignment-model.js";
+// Helper to bucket Materials / Assignments / Questions
+function bucket(items, arrName, topicMap, uncategorized) {
+  items.forEach(item => {
+    const tid = item.topic?.toString();
+    if (tid && topicMap[tid]) {
+      topicMap[tid][arrName].push(item);
+    } else {
+      uncategorized[arrName].push(item);
+    }
+  });
+}
 function bucketGroupAssignments(groupAssignments, arrName, topicMap, uncategorized) {
   groupAssignments.forEach(asg => {
     // Always one feed item per assignment, with groups nested inside
     const feedItem = {
-      _id:          asg._id,
-      type:         "groupAssignment",
-      title:        asg.title,
-      content:      asg.content,
-      media:        asg.media,
-      documents:    asg.documents,
+      _id: asg._id,
+      type: "groupAssignment",
+      title: asg.title,
+      content: asg.content,
+      media: asg.media,
+      documents: asg.documents,
       youtubeLinks: asg.youtubeLinks,
-      links:        asg.links,
-      groups:       asg.groups, // ← pass all group info for frontend to handle
-      postedBy:     asg.postedBy,
-      createdAt:    asg.createdAt,
-      updatedAt:    asg.updatedAt
+      links: asg.links,
+      groups: asg.groups, // ← pass all group info for frontend to handle
+      postedBy: asg.postedBy,
+      createdAt: asg.createdAt,
+      updatedAt: asg.updatedAt
     };
     const tid = asg.topic?.toString();
     if (tid && topicMap[tid]) topicMap[tid][arrName].push(feedItem);
@@ -248,7 +249,7 @@ FeedRouter.get(
             .populate("postedBy", "username email")
             .populate("visibleTo", "username email")
             .lean(),
-          groupAssignmentModel  
+          groupAssignmentModel
             .find({ courseInstance: courseInstanceId })
             .populate("postedBy", "username email")
             .lean(),
@@ -259,9 +260,9 @@ FeedRouter.get(
       topics.forEach(topic => {
         topicMap[topic._id.toString()] = {
           topic,
-          materials:       [],
-          assignments:     [],
-          questions:       [],
+          materials: [],
+          assignments: [],
+          questions: [],
           groupAssignments: []    // ← new bucket
         };
       });
@@ -269,16 +270,16 @@ FeedRouter.get(
       // 4) uncategorized bucket
       const uncategorized = {
         topic: { _id: null, title: "No topic" },
-        materials:       [],
-        assignments:     [],
-        questions:       [],
+        materials: [],
+        assignments: [],
+        questions: [],
         groupAssignments: []
       };
 
       // 5) bucket everything
-      bucket(materials,       "materials",       topicMap, uncategorized);
-      bucket(assignments,     "assignments",     topicMap, uncategorized);
-      bucket(questions,       "questions",       topicMap, uncategorized);
+      bucket(materials, "materials", topicMap, uncategorized);
+      bucket(assignments, "assignments", topicMap, uncategorized);
+      bucket(questions, "questions", topicMap, uncategorized);
       bucketGroupAssignments(groupAssignments, "groupAssignments", topicMap, uncategorized);
 
       // 6) sort each array by date desc
