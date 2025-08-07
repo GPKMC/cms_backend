@@ -4,6 +4,9 @@ import { body, param, validationResult } from "express-validator";
 import QuizQuestion from "./quizquestion-model.js";
 import Submission   from "./submission-model.js";
 import { authmiddleware, authorizedRole } from "../users/user-middleware.js";
+import CourseInstance from "../course/courseinstance-model.js";
+import User from "../users/user-model.js";
+import notificationModel from "../functions/notification-model.js";
 
 const QuizRouter = express.Router();
 
@@ -25,6 +28,40 @@ const isFutureDate = (value) => {
 };
 
 // ─── 1. Create a quiz ─────────────────────────
+// QuizRouter.post(
+//   "/",
+//   authmiddleware,
+//   authorizedRole("teacher"),
+//   [
+//     body("title").isString().notEmpty(),
+//     body("description").optional().isString(),
+//     body("courseInstance").isMongoId(),
+//     body("dueDate")
+//       .optional()
+//       .isISO8601().withMessage("dueDate must be a valid ISO8601 date")
+//       .bail()
+//       .custom(isFutureDate)
+//   ],
+//   validate,
+//   async (req, res, next) => {
+//     try {
+//       const quiz = await QuizQuestion.create({
+//         title:          req.body.title,
+//         description:    req.body.description,
+//         courseInstance: req.body.courseInstance,
+//         postedBy:       req.user._id,
+//         dueDate:        req.body.dueDate
+//       });
+//       res.status(201).json(quiz);
+//     } catch (err) {
+//       next(err);
+//     }
+//   }
+// );
+
+
+// ...the rest of your QuizRouter code above...
+
 QuizRouter.post(
   "/",
   authmiddleware,
@@ -49,6 +86,31 @@ QuizRouter.post(
         postedBy:       req.user._id,
         dueDate:        req.body.dueDate
       });
+
+      // ---- Notification logic here ----
+      let recipients = [];
+      // You can add a "visibleTo" field like in other models for more granular access, or notify the whole batch.
+      const courseInstance = await CourseInstance.findById(quiz.courseInstance);
+      if (courseInstance) {
+        const batchStudents = await User.find({
+          role: "student",
+          batch: courseInstance.batch,
+        }).select("_id");
+        recipients = batchStudents.map(s => s._id.toString());
+      }
+      if (recipients.length > 0) {
+        await notificationModel.create({
+          courseInstance: quiz.courseInstance,
+          type: "quiz",
+          refId: quiz._id,
+          title: quiz.title,
+          message: `New quiz posted: ${quiz.title}`,
+          createdBy: req.user._id,
+          recipients,
+        });
+      }
+      // ---- End notification logic ----
+
       res.status(201).json(quiz);
     } catch (err) {
       next(err);

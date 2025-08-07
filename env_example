@@ -1,4 +1,4 @@
-MONGODB_URL= mongodb+srv://karkibipl:biplovkarki@cmsdatabase.kznvlq9.mongodb.net/
+MONGODB_URL= mongodb+srv://karkibipl:Biplov0981@cmsdatabase.kznvlq9.mongodb.net/
 PORT = 5000
 JWT_SECRET=CMS_gpcollege
 GOOGLE_CLIENT_ID=11256643343-13ptru7cj4eke5i9jsm253gi70td9f1e.apps.googleusercontent.com

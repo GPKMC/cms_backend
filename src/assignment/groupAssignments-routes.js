@@ -5,7 +5,8 @@ import mongoose from "mongoose";
 import groupAssignmentModel from "./groupAssignment-model.js";
 import { authmiddleware, authorizedRole } from "../users/user-middleware.js";
 import upload from "../utlis/multer-config.js";
-
+import CourseInstance from "../course/courseinstance-model.js";
+import Notification from "../functions/notification-model.js"
 const GroupAssignmentRouter = express.Router();
 
 // Helper to turn multer’s files into { url, originalname } objects
@@ -217,6 +218,26 @@ async (req, res) => {
 
     const assignment = new groupAssignmentModel(payload);
     await assignment.save();
+const courseInstance = await CourseInstance.findById(payload.courseInstance);
+if (!courseInstance) {
+  return res.status(400).json({ error: "Invalid courseInstance" });
+}
+const groupMembers = new Set();
+assignment.groups.forEach(group => {
+  (group.members || []).forEach(id => groupMembers.add(String(id)));
+});
+const recipients = Array.from(groupMembers);
+
+await Notification.create({
+  courseInstance: assignment.courseInstance,
+  type: "group-assignment",
+  refId: assignment._id,
+  title: assignment.title,
+  message: `New group assignment posted: ${assignment.title}`,
+  createdBy: req.user._id,
+  recipients,
+});
+
 
     res.status(201).json(assignment);
   } catch (err) {

@@ -3,6 +3,9 @@ import { authmiddleware, authorizedRole } from "../users/user-middleware.js";
 import upload from "../utlis/multer-config.js";
 import mongoose from "mongoose";
 import questionModel from "./question-model.js";
+import notificationModel from "../functions/notification-model.js";
+import User from "../users/user-model.js";
+import CourseInstance from "../course/courseinstance-model.js";
 const QuestionRouter = express.Router();
 
 // Helper to generate file URLs
@@ -59,6 +62,33 @@ QuestionRouter.post(
         dueDate: req.body.dueDate,
         points: req.body.points,
       });
+
+      // --- Notification logic here ---
+      let recipients = [];
+      if (Array.isArray(newQuestion.visibleTo) && newQuestion.visibleTo.length > 0) {
+        recipients = newQuestion.visibleTo.map(id => id.toString());
+      } else {
+        const courseInstance = await CourseInstance.findById(newQuestion.courseInstance);
+        if (courseInstance) {
+          const batchStudents = await User.find({
+            role: "student",
+            batch: courseInstance.batch,
+          }).select("_id");
+          recipients = batchStudents.map(s => s._id.toString());
+        }
+      }
+      if (recipients.length > 0) {
+        await notificationModel.create({
+          courseInstance: newQuestion.courseInstance,
+          type: "question",
+          refId: newQuestion._id,
+          title: newQuestion.title,
+          message: `New question posted: ${newQuestion.title}`,
+          createdBy: req.user._id,
+          recipients,
+        });
+      }
+
       res.status(201).json({ question: newQuestion });
     } catch (err) {
       res.status(500).json({ error: err.message });
