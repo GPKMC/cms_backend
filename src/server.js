@@ -37,6 +37,7 @@ import groupAssignmentSubmissionRouter from './assignment/groupAssignmentSubmiss
 import questionSubmissionRouter from './question/questionSubmission-routes.js';
 import NotificationRouter from './functions/notification-routes.js';
 import AssignmentFeedRouter from './assignmentfeed/assignment-feed.js';
+import StudentProgressRouter from './student-routes/student-assignment.js';
 
 
 connectDB();
@@ -82,7 +83,7 @@ app.use('/groupsubmission',groupAssignmentSubmissionRouter);
 app.use('/questionsubmission',questionSubmissionRouter);
 app.use('/quiz-submissions', QuizSubmissionrouter);
 app.use('/Notification', NotificationRouter);
-app.use('/assignmentFeed', AssignmentFeedRouter);
+app.use('/assignmentFeed', StudentProgressRouter);
 // app.use('/submission',Submissionrouter);
 
 // Run the job immediately on server start

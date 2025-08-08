@@ -435,7 +435,7 @@ userRouter.delete("/users/:id", authmiddleware,authorizedRole("admin"),  async (
 });
 
 // GET user by ID
-userRouter.get("/users/:id", authmiddleware, authorizedRole("admin"), async (req, res) => {
+userRouter.get("/users/:id", authmiddleware, authorizedRole("admin",), async (req, res) => {
   try {
     if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
       return res.status(400).json({ error: "Invalid user ID" });
@@ -505,7 +505,123 @@ userRouter.get("/users", authmiddleware, authorizedRole("admin"), async (req, re
   }
 });
 
+// CHANGE OWN PASSWORD (self-service)
+userRouter.patch(
+  "/users/me/password",
+  authmiddleware,
+  async (req, res) => {
+    try {
+      const userId = req.user?._id;
+      const { currentPassword, newPassword } = req.body || {};
 
+      if (!currentPassword || !newPassword) {
+        return res.status(400).json({ message: "currentPassword and newPassword are required." });
+      }
 
+      // validate strength using your existing helper
+      if (!validatePassword(newPassword)) {
+        return res.status(400).json({
+          field: "newPassword",
+          message:
+            "Password must start with an uppercase letter, contain at least one number, one special character, and be at least 7 characters long.",
+        });
+      }
+
+      const user = await User.findById(userId).select("+password");
+      if (!user) return res.status(404).json({ message: "User not found." });
+
+      // verify old password
+      const ok = await bcrypt.compare(currentPassword, user.password);
+      if (!ok) {
+        return res.status(400).json({ field: "currentPassword", message: "Current password is incorrect." });
+      }
+
+      // prevent reusing the same password
+      const isSame = await bcrypt.compare(newPassword, user.password);
+      if (isSame) {
+        return res.status(400).json({ field: "newPassword", message: "New password must be different from current password." });
+      }
+
+      user.password = await bcrypt.hash(newPassword, 10);
+      await user.save();
+
+      return res.json({ message: "Password updated successfully." });
+    } catch (err) {
+      console.error(err);
+      return res.status(500).json({ message: "Server error" });
+    }
+  }
+);
+
+// GET /user-api/student/:id  (student can only fetch themselves)
+userRouter.get(
+  "/student/:id",
+  authmiddleware,
+  authorizedRole("student"),
+  async (req, res) => {
+    try {
+      const { id } = req.params;
+
+      if (!mongoose.Types.ObjectId.isValid(id)) {
+        return res.status(400).json({ error: "Invalid user ID" });
+      }
+
+      // students can only fetch themselves
+      if (String(req.user._id) !== String(id)) {
+        return res.status(403).json({ error: "Forbidden" });
+      }
+
+      const user = await User.findById(id)
+        .select("-password")
+        .populate("batch", "batchname year faculty"); // adjust fields
+
+      if (!user) {
+        return res.status(404).json({ error: "User not found" });
+      }
+      if (user.role !== "student") {
+        return res.status(403).json({ error: "Only students can access this resource." });
+      }
+
+      res.json({ user });
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({ message: "Server error" });
+    }
+  }
+);
+userRouter.get(
+  "/teacher/:id",
+  authmiddleware,
+  authorizedRole("teacher"),
+  async (req, res) => {
+    try {
+      const { id } = req.params;
+
+      if (!mongoose.Types.ObjectId.isValid(id)) {
+        return res.status(400).json({ error: "Invalid user ID" });
+      }
+
+      // students can only fetch themselves
+      if (String(req.user._id) !== String(id)) {
+        return res.status(403).json({ error: "Forbidden" });
+      }
+
+      const user = await User.findById(id)
+        .select("-password")
+
+      if (!user) {
+        return res.status(404).json({ error: "User not found" });
+      }
+      if (user.role !== "teacher") {
+        return res.status(403).json({ error: "Only students can access this resource." });
+      }
+
+      res.json({ user });
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({ message: "Server error" });
+    }
+  }
+);
 
 export default userRouter;

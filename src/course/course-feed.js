@@ -179,8 +179,9 @@ import courseMaterialsModel from "./courseMaterials-model.js";
 import questionModel from "../question/question-model.js";
 import Assignment from "../assignment/assignmentModel.js";
 
-const FeedRouter = express.Router();
 import groupAssignmentModel from "../assignment/groupAssignment-model.js";
+import quizquestionModel from "../quizQuestion/quizquestion-model.js";
+const FeedRouter = express.Router();
 // Helper to bucket Materials / Assignments / Questions
 function bucket(items, arrName, topicMap, uncategorized) {
   items.forEach(item => {
@@ -205,6 +206,8 @@ function bucketGroupAssignments(groupAssignments, arrName, topicMap, uncategoriz
       youtubeLinks: asg.youtubeLinks,
       links: asg.links,
       groups: asg.groups, // ← pass all group info for frontend to handle
+       groupCount: Array.isArray(asg.groups) ? asg.groups.length : 0, // ✅ added
+
       postedBy: asg.postedBy,
       createdAt: asg.createdAt,
       updatedAt: asg.updatedAt
@@ -232,28 +235,46 @@ FeedRouter.get(
         .lean();
 
       // 2) fetch all four resource types in parallel
-      const [materials, assignments, questions, groupAssignments] =
-        await Promise.all([
-          courseMaterialsModel
-            .find({ courseInstance: courseInstanceId })
-            .populate("postedBy", "username email")
-            .populate("visibleTo", "username email")
-            .lean(),
-          Assignment
-            .find({ courseInstance: courseInstanceId })
-            .populate("postedBy", "username email")
-            .populate("visibleTo", "username email")
-            .lean(),
-          questionModel
-            .find({ courseInstance: courseInstanceId })
-            .populate("postedBy", "username email")
-            .populate("visibleTo", "username email")
-            .lean(),
-          groupAssignmentModel
-            .find({ courseInstance: courseInstanceId })
-            .populate("postedBy", "username email")
-            .lean(),
-        ]);
+     // 2) fetch all resource types in parallel
+let [materials, assignments, questions, groupAssignments, quizzes] =
+  await Promise.all([
+    courseMaterialsModel
+      .find({ courseInstance: courseInstanceId })
+      .populate("postedBy", "username email")
+      .populate("visibleTo", "_id") // only need IDs
+      .lean(),
+    Assignment
+      .find({ courseInstance: courseInstanceId })
+      .populate("postedBy", "username email")
+      .populate("visibleTo", "_id")
+      .lean(),
+    questionModel
+      .find({ courseInstance: courseInstanceId })
+      .populate("postedBy", "username email")
+      .populate("visibleTo", "_id")
+      .lean(),
+    groupAssignmentModel
+      .find({ courseInstance: courseInstanceId })
+      .populate("postedBy", "username email")
+      .lean(),
+    quizquestionModel
+      .find({ courseInstance: courseInstanceId })
+      .populate("postedBy", "username email")
+      .lean(),
+  ]);
+
+// ✅ Add visibleCount for everything except group assignments
+const mapWithVisibleCount = (items) =>
+  items.map(i => ({
+    ...i,
+    visibleCount: Array.isArray(i.visibleTo) ? i.visibleTo.length : 0
+  }));
+
+materials = mapWithVisibleCount(materials);
+assignments = mapWithVisibleCount(assignments);
+questions = mapWithVisibleCount(questions);
+quizzes = mapWithVisibleCount(quizzes);
+
 
       // 3) build topicMap
       const topicMap = {};
@@ -263,7 +284,8 @@ FeedRouter.get(
           materials: [],
           assignments: [],
           questions: [],
-          groupAssignments: []    // ← new bucket
+          groupAssignments: [] ,   // ← new bucket
+          quizzes:[]
         };
       });
 
@@ -273,7 +295,9 @@ FeedRouter.get(
         materials: [],
         assignments: [],
         questions: [],
-        groupAssignments: []
+        groupAssignments: [],
+        quizzes:[]
+
       };
 
       // 5) bucket everything
@@ -281,6 +305,7 @@ FeedRouter.get(
       bucket(assignments, "assignments", topicMap, uncategorized);
       bucket(questions, "questions", topicMap, uncategorized);
       bucketGroupAssignments(groupAssignments, "groupAssignments", topicMap, uncategorized);
+      bucket(quizzes,"quizzes",topicMap,uncategorized)
 
       // 6) sort each array by date desc
       const sortByDate = (a, b) =>
@@ -292,11 +317,13 @@ FeedRouter.get(
         g.assignments.sort(sortByDate);
         g.questions.sort(sortByDate);
         g.groupAssignments.sort(sortByDate);
+        g.quizzes.sort(sortByDate);
       });
       uncategorized.materials.sort(sortByDate);
       uncategorized.assignments.sort(sortByDate);
       uncategorized.questions.sort(sortByDate);
       uncategorized.groupAssignments.sort(sortByDate);
+      uncategorized.quizzes.sort(sortByDate)
 
       // 7) assemble final result
       let result = Object.values(topicMap);
@@ -304,7 +331,8 @@ FeedRouter.get(
         uncategorized.materials.length ||
         uncategorized.assignments.length ||
         uncategorized.questions.length ||
-        uncategorized.groupAssignments.length
+        uncategorized.groupAssignments.length ||
+        uncategorized.quizzes.length 
       ) {
         result.push(uncategorized);
       }
