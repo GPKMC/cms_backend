@@ -1,4 +1,5 @@
 import express from 'express';
+import mongoose from 'mongoose';
 import { HfInference } from '@huggingface/inference';
 import { authmiddleware, authorizedRole } from '../users/user-middleware.js';
 import { cosineSimilarity } from '../utlis/cosine-similarity.js';
@@ -296,6 +297,42 @@ if (plagiarismPercentage >= 30) {
     } catch (error) {
       console.error("Error in question submission route:", error);
       return res.status(500).json({ error: 'Internal server error.' });
+    }
+  }
+);
+
+// PATCH /question-submission/:submissionId/grade
+// PATCH /question-submission/:submissionId/grade
+questionSubmissionRouter.patch(
+  '/:submissionId/grade',
+  authmiddleware,
+  authorizedRole('teacher', 'admin'),
+  async (req, res) => {
+    try {
+      const { submissionId } = req.params;
+      const { grade, feedback } = req.body ?? {};
+
+      if (!mongoose.Types.ObjectId.isValid(submissionId)) {
+        return res.status(400).json({ error: 'Invalid submission id' });
+      }
+
+      // coerce grade -> number|null
+      const nextGrade =
+        grade === '' || grade === null || grade === undefined
+          ? null
+          : Number(grade);
+
+      const updated = await questionSubmissionModel.findByIdAndUpdate(
+        submissionId,
+        { $set: { grade: nextGrade, feedback: feedback ?? '' } },
+        { new: true }
+      );
+
+      if (!updated) return res.status(404).json({ error: 'Submission not found' });
+      return res.json({ status: 'UPDATED', submission: updated });
+    } catch (err) {
+      console.error(err);
+      return res.status(500).json({ error: 'Internal server error' });
     }
   }
 );
