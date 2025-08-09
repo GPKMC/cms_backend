@@ -140,6 +140,7 @@ QuestionRouter.get(
       const question = await questionModel.findById(req.params.id)
         .populate("postedBy", "username email role")
         .lean();
+        
 
       if (!question) return res.status(404).json({ error: "Not found" });
 
