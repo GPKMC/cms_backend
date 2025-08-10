@@ -5,6 +5,7 @@ import Assignment from "./assignmentModel.js";
 import CourseInstance from "../course/courseinstance-model.js";
 import Notification from "../functions/notification-model.js"
 import User from "../users/user-model.js";
+import courseCommentModel from "../comment/courseComment-model.js";
 const AssignmentRouter = express.Router();
 
 // Helper to generate file URLs
@@ -156,17 +157,34 @@ AssignmentRouter.delete(
   authmiddleware,
   authorizedRole("teacher"),
   async (req, res) => {
+    const session = await Assignment.startSession();
     try {
-      const assignment = await Assignment.findById(req.params.id);
-      if (!assignment) return res.status(404).json({ error: "Assignment not found" });
-      // Only posted teacher can delete
-      if (!assignment.postedBy.equals(req.user._id))
-        return res.status(403).json({ error: "You are not allowed to delete this assignment" });
+      await session.withTransaction(async () => {
+        const assignment = await Assignment.findById(req.params.id).session(session);
+        if (!assignment) {
+          return res.status(404).json({ error: "Assignment not found" });
+        }
+        if (!assignment.postedBy.equals(req.user._id)) {
+          return res
+            .status(403)
+            .json({ error: "You are not allowed to delete this assignment" });
+        }
 
-      await assignment.deleteOne();
-      res.json({ message: "Assignment deleted" });
+        // delete comments that belong to this assignment
+        await courseCommentModel.deleteMany({
+          type: "assignment",
+          contentId: assignment._id,
+        }).session(session);
+
+        // finally delete the assignment
+        await assignment.deleteOne({ session });
+      });
+
+      res.json({ message: "Assignment and related comments deleted" });
     } catch (err) {
       res.status(500).json({ error: err.message });
+    } finally {
+      session.endSession();
     }
   }
 );

@@ -16,7 +16,7 @@ dotenv.config();
 
 const hf = new HfInference(process.env.HUGGINGFACE_TOKEN);
 
-const uploadPath = path.join(process.cwd(), ".uploads", "groupAssignmentSubmission");
+const uploadPath = path.join(process.cwd(), "uploads", "groupAssignmentSubmission");
 fsExtra.ensureDirSync(uploadPath);
 
 const storage = multer.diskStorage({
