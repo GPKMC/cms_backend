@@ -22,6 +22,8 @@ const assignmentSchema = new Schema({
   visibleTo: [{ type: Schema.Types.ObjectId, ref: "User" }], // Restrict to users
   dueDate: { type: Date, required: true },
   points: { type: Number, default: 0 },
+  acceptingSubmissions: { type: Boolean, default: true },
+  closeAt: { type: Date, default: null },
   createdAt: { type: Date, default: Date.now },
   updatedAt: { type: Date, default: Date.now }
 });

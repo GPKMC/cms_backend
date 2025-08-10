@@ -40,7 +40,6 @@ const submissionSchema = new Schema({
   isFlagged:     { type: Boolean, default: false },
   plagiarismPercentage: { type: Number, default: 0 },
   status:        { type: String, enum: ['draft', 'submitted'], default: 'draft' },
-
   plagiarismDetails: [plagiarismDetailSchema]
 });
 

@@ -11,10 +11,11 @@ import { extractTextFromFile } from '../utlis/fileExtract.js';
 import { cosineSimilarity } from '../utlis/cosine-similarity.js';
 import dotenv from "dotenv";
 import groupSubmissionModel from './groupSubmission-model.js';
+import assignmentModel from './assignmentModel.js';
 dotenv.config();
 const hf = new HfInference(process.env.HUGGINGFACE_TOKEN);
 
-const uploadPath = path.join(process.cwd(), ".uploads", "assignmentSubmission");
+const uploadPath = path.join(process.cwd(), "uploads", "assignmentSubmission");
 fsExtra.ensureDirSync(uploadPath);
 
 const storage = multer.diskStorage({
@@ -70,6 +71,19 @@ assignmentSubmissionrouter.post(
   async (req, res) => {
     try {
       const { assignment, student } = req.body;
+      const assignmentDoc = await assignmentModel
+  .findById(assignment)
+  .select('acceptingSubmissions closeAt');
+
+if (!assignmentDoc) {
+  return res.status(404).json({ error: 'Assignment not found.' });
+}
+if (assignmentDoc.acceptingSubmissions === false) {
+  return res.status(403).json({ error: 'This assignment is not accepting submissions' });
+}
+if (assignmentDoc.closeAt && new Date() > new Date(assignmentDoc.closeAt)) {
+  return res.status(403).json({ error: 'The submission deadline has passed' });
+}
       const files = req.files || [];
       let combinedText = req.body.combinedText || "";
 
@@ -310,7 +324,7 @@ for (const sub of groupSubmissions) {
         });
 
       }
-
+   
       const newSubmission = new AssignmentSubmissionModel({
         assignment,
         student,
