@@ -60,8 +60,9 @@ const groupAssignmentSchema = new Schema({
   groups:      [groupSchema],
 
   dueDate:     Date,
-  points:      { type: Number, default: 0 },
-
+  points:      { type: Number, default: 100 },
+  acceptingSubmissions: { type: Boolean, default: true },
+  closeAt: { type: Date, default: null },
   createdAt:   { type: Date, default: Date.now },
   updatedAt:   { type: Date, default: Date.now }
 });
