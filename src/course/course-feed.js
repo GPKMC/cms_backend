@@ -1,175 +1,3 @@
-
-
-// FeedRouter.get(
-//   "/:courseInstanceId",
-//   authmiddleware,
-//   authorizedRole('teacher', 'student'),
-//   async (req, res) => {
-//     const { courseInstanceId } = req.params;
-//     if (!mongoose.Types.ObjectId.isValid(courseInstanceId))
-//       return res.status(400).json({ error: "Invalid courseInstanceId" });
-
-//     try {
-//       const topics = await topicModel.find({ courseInstance: courseInstanceId }).lean();
-
-//       const [materials, assignments, questions] = await Promise.all([
-//         courseMaterialsModel.find({ courseInstance: courseInstanceId })
-//           .populate("postedBy", "username email")
-//           .populate("visibleTo", "username email")
-//           .lean(),
-//         assignmentModel.find({ courseInstance: courseInstanceId })
-//           .populate("postedBy", "username email")
-//           .populate("visibleTo", "username email")
-//           .lean(),
-//         questionModel.find({ courseInstance: courseInstanceId })
-//           .populate("postedBy", "username email")
-//           .populate("visibleTo", "username email")
-//           .lean(),
-//       ]);
-
-//       // Build topicMap with questions
-//       const topicMap = {};
-//       topics.forEach(topic => {
-//         topicMap[topic._id.toString()] = {
-//           topic,
-//           materials: [],
-//           assignments: [],
-//           questions: []
-//         };
-//       });
-
-//       const uncategorized = {
-//         topic: { _id: null, title: "No topic" },
-//         materials: [],
-//         assignments: [],
-//         questions: []
-//       };
-
-//       // Materials
-//       materials.forEach(mat => {
-//         if (mat.topic) {
-//           const t = topicMap[mat.topic?.toString()];
-//           if (t) t.materials.push(mat);
-//           else uncategorized.materials.push(mat);
-//         } else {
-//           uncategorized.materials.push(mat);
-//         }
-//       });
-//       // Assignments
-//       assignments.forEach(assign => {
-//         if (assign.topic) {
-//           const t = topicMap[assign.topic?.toString()];
-//           if (t) t.assignments.push(assign);
-//           else uncategorized.assignments.push(assign);
-//         } else {
-//           uncategorized.assignments.push(assign);
-//         }
-//       });
-//       // Questions
-//       questions.forEach(q => {
-//         if (q.topic) {
-//           const t = topicMap[q.topic?.toString()];
-//           if (t) t.questions.push(q);
-//           else uncategorized.questions.push(q);
-//         } else {
-//           uncategorized.questions.push(q);
-//         }
-//       });
-
-//       // Sort everything (optional)
-//       Object.values(topicMap).forEach(group => {
-//         group.materials.sort((a, b) => new Date(b.updatedAt || b.createdAt) - new Date(a.updatedAt || a.createdAt));
-//         group.assignments.sort((a, b) => new Date(b.updatedAt || b.createdAt) - new Date(a.updatedAt || a.createdAt));
-//         group.questions.sort((a, b) => new Date(b.updatedAt || b.createdAt) - new Date(a.updatedAt || a.createdAt));
-//       });
-//       uncategorized.materials.sort((a, b) => new Date(b.updatedAt || b.createdAt) - new Date(a.updatedAt || a.createdAt));
-//       uncategorized.assignments.sort((a, b) => new Date(b.updatedAt || b.createdAt) - new Date(a.updatedAt || a.createdAt));
-//       uncategorized.questions.sort((a, b) => new Date(b.updatedAt || b.createdAt) - new Date(a.updatedAt || a.createdAt));
-
-//       // Output
-//       let result = Object.values(topicMap);
-//       if (uncategorized.materials.length || uncategorized.assignments.length || uncategorized.questions.length)
-//         result = [...result, uncategorized];
-
-//       res.json(result);
-
-//     } catch (err) {
-//       res.status(500).json({ error: err.message });
-//     }
-//   }
-// );
-
-// export default FeedRouter;
-
-// import assignmentModel from "../assignment/assignmentModel.js";
-
-// const FeedRouter = express.Router();
-
-
-// Helper to bucket GroupAssignments, handling global vs per‑group overrides
-// function bucketGroupAssignments(groupAssignments, arrName, topicMap, uncategorized) {
-//   groupAssignments.forEach(asg => {
-//     // detect any per‐group override
-//     const hasOverride = asg.groups.some(g =>
-//       Boolean(
-//         g.title    || g.content ||
-//         (g.media?.length    ?? 0) > 0 ||
-//         (g.documents?.length?? 0) > 0 ||
-//         (g.youtubeLinks?.length ?? 0) > 0 ||
-//         (g.links?.length    ?? 0) > 0
-//       )
-//     );
-
-//     if (!hasOverride) {
-//       // CASE #1: no overrides → one global feed item
-//       const feedItem = {
-//         _id:          asg._id,
-//         type:         "groupAssignment",
-//         title:        asg.title,
-//         content:      asg.content,
-//         media:        asg.media,
-//         documents:    asg.documents,
-//         youtubeLinks: asg.youtubeLinks,
-//         links:        asg.links,
-//         groups:       asg.groups.map(g => ({
-//           id:      g.id,
-//           name:    g.name,
-//           members: g.members
-//         })),
-//         postedBy:     asg.postedBy,
-//         createdAt:    asg.createdAt,
-//         updatedAt:    asg.updatedAt
-//       };
-//       const tid = asg.topic?.toString();
-//       if (tid && topicMap[tid]) topicMap[tid][arrName].push(feedItem);
-//       else uncategorized[arrName].push(feedItem);
-
-//     } else {
-//       // CASE #2: one feed item per group, merging overrides
-//       asg.groups.forEach(g => {
-//         const feedItem = {
-//           _id:          `${asg._id}_${g.id}`,  // unique per-group
-//           parentId:     asg._id,
-//           type:         "groupAssignment",
-//           groupName:    g.name,
-//           title:        g.title    || asg.title,
-//           content:      g.content  || asg.content,
-//           media:        (g.media?.length    ? g.media    : asg.media)    || [],
-//           documents:    (g.documents?.length? g.documents: asg.documents)|| [],
-//           youtubeLinks: (g.youtubeLinks?.length? g.youtubeLinks : asg.youtubeLinks)|| [],
-//           links:        (g.links?.length    ? g.links    : asg.links)    || [],
-//           members:      g.members,
-//           postedBy:     asg.postedBy,
-//           createdAt:    asg.createdAt,
-//           updatedAt:    asg.updatedAt
-//         };
-//         const tid = asg.topic?.toString();
-//         if (tid && topicMap[tid]) topicMap[tid][arrName].push(feedItem);
-//         else uncategorized[arrName].push(feedItem);
-//       });
-//     }
-//   });
-// }
 import mongoose from "mongoose";
 import express from "express";
 import { authmiddleware, authorizedRole } from "../users/user-middleware.js";
@@ -178,24 +6,23 @@ import topicModel from "./topic-model.js";
 import courseMaterialsModel from "./courseMaterials-model.js";
 import questionModel from "../question/question-model.js";
 import Assignment from "../assignment/assignmentModel.js";
-
 import groupAssignmentModel from "../assignment/groupAssignment-model.js";
 import quizquestionModel from "../quizQuestion/quizquestion-model.js";
+
 const FeedRouter = express.Router();
-// Helper to bucket Materials / Assignments / Questions
+
+/** Generic bucketer for materials/assignments/questions/quizzes */
 function bucket(items, arrName, topicMap, uncategorized) {
-  items.forEach(item => {
+  items.forEach((item) => {
     const tid = item.topic?.toString();
-    if (tid && topicMap[tid]) {
-      topicMap[tid][arrName].push(item);
-    } else {
-      uncategorized[arrName].push(item);
-    }
+    if (tid && topicMap[tid]) topicMap[tid][arrName].push(item);
+    else uncategorized[arrName].push(item);
   });
 }
+
+/** Bucketer for group assignments: one feed item per GA, with nested groups */
 function bucketGroupAssignments(groupAssignments, arrName, topicMap, uncategorized) {
-  groupAssignments.forEach(asg => {
-    // Always one feed item per assignment, with groups nested inside
+  groupAssignments.forEach((asg) => {
     const feedItem = {
       _id: asg._id,
       type: "groupAssignment",
@@ -205,12 +32,12 @@ function bucketGroupAssignments(groupAssignments, arrName, topicMap, uncategoriz
       documents: asg.documents,
       youtubeLinks: asg.youtubeLinks,
       links: asg.links,
-      groups: asg.groups, // ← pass all group info for frontend to handle
-       groupCount: Array.isArray(asg.groups) ? asg.groups.length : 0, // ✅ added
-
+      groups: asg.groups, // entire groups array; front-end can decide how to display
+      groupCount: Array.isArray(asg.groups) ? asg.groups.length : 0,
       postedBy: asg.postedBy,
       createdAt: asg.createdAt,
-      updatedAt: asg.updatedAt
+      updatedAt: asg.updatedAt,
+      topic: asg.topic,
     };
     const tid = asg.topic?.toString();
     if (tid && topicMap[tid]) topicMap[tid][arrName].push(feedItem);
@@ -218,129 +45,149 @@ function bucketGroupAssignments(groupAssignments, arrName, topicMap, uncategoriz
   });
 }
 
-
 FeedRouter.get(
   "/:courseInstanceId",
   authmiddleware,
   authorizedRole("teacher", "student"),
   async (req, res) => {
     const { courseInstanceId } = req.params;
-    if (!mongoose.Types.ObjectId.isValid(courseInstanceId))
+    if (!mongoose.Types.ObjectId.isValid(courseInstanceId)) {
       return res.status(400).json({ error: "Invalid courseInstanceId" });
+    }
+
+    const isTeacher = req.user?.role === "teacher";
+    const userId = req.user?._id?.toString?.();
 
     try {
-      // 1) fetch topics
-      const topics = await topicModel
-        .find({ courseInstance: courseInstanceId })
-        .lean();
+      // 1) Topics (shared)
+      const topics = await topicModel.find({ courseInstance: courseInstanceId }).lean();
 
-      // 2) fetch all four resource types in parallel
-     // 2) fetch all resource types in parallel
-let [materials, assignments, questions, groupAssignments, quizzes] =
-  await Promise.all([
-    courseMaterialsModel
-      .find({ courseInstance: courseInstanceId })
-      .populate("postedBy", "username email")
-      .populate("visibleTo", "_id") // only need IDs
-      .lean(),
-    Assignment
-      .find({ courseInstance: courseInstanceId })
-      .populate("postedBy", "username email")
-      .populate("visibleTo", "_id")
-      .lean(),
-    questionModel
-      .find({ courseInstance: courseInstanceId })
-      .populate("postedBy", "username email")
-      .populate("visibleTo", "_id")
-      .lean(),
-    groupAssignmentModel
-      .find({ courseInstance: courseInstanceId })
-      .populate("postedBy", "username email")
-      .lean(),
-    quizquestionModel
-      .find({ courseInstance: courseInstanceId })
-      .populate("postedBy", "username email")
-      .lean(),
-  ]);
+      // 2) Build per-role queries
+      // Teachers: see everything within the courseInstance
+      const baseCourseFilter = { courseInstance: courseInstanceId };
 
-// ✅ Add visibleCount for everything except group assignments
-const mapWithVisibleCount = (items) =>
-  items.map(i => ({
-    ...i,
-    visibleCount: Array.isArray(i.visibleTo) ? i.visibleTo.length : 0
-  }));
+      // Students: public (no visibleTo) OR includes the student id
+      // NOTE: $size:0 only matches [] when the field exists; pair with $exists:false.
+      const visibleToFilter = isTeacher
+        ? {} // no visibility restriction for teachers
+        : {
+            $or: [
+              { visibleTo: { $exists: false } },
+              { visibleTo: { $size: 0 } },
+              { visibleTo: userId }, // Mongoose will cast userId to ObjectId
+            ],
+          };
 
-materials = mapWithVisibleCount(materials);
-assignments = mapWithVisibleCount(assignments);
-questions = mapWithVisibleCount(questions);
-quizzes = mapWithVisibleCount(quizzes);
+      // Group assignments:
+      // Teachers: all group assignments in the course.
+      // Students: only group assignments where any group's members include the student.
+      const groupAssignmentFilter = isTeacher
+        ? baseCourseFilter
+        : { ...baseCourseFilter, "groups.members": userId };
 
+      // 3) Fetch everything in parallel (role-aware)
+      let [materials, assignments, questions, groupAssignments, quizzes] = await Promise.all([
+        courseMaterialsModel
+          .find({ ...baseCourseFilter, ...visibleToFilter })
+          .populate("postedBy", "username email")
+          .populate("visibleTo", "_id")
+          .lean(),
+        Assignment.find({ ...baseCourseFilter, ...visibleToFilter })
+          .populate("postedBy", "username email")
+          .populate("visibleTo", "_id")
+          .lean(),
+        questionModel
+          .find({ ...baseCourseFilter, ...visibleToFilter })
+          .populate("postedBy", "username email")
+          .populate("visibleTo", "_id")
+          .lean(),
+        groupAssignmentModel
+          .find(groupAssignmentFilter)
+          .populate("postedBy", "username email")
+          .lean(),
+        quizquestionModel
+          .find({ ...baseCourseFilter, ...visibleToFilter })
+          .populate("postedBy", "username email")
+          .populate("visibleTo", "_id")
+          .lean(),
+      ]);
 
-      // 3) build topicMap
+      // 4) Add visibleCount (for everything that has visibleTo)
+      const withVisibleCount = (items) =>
+        items.map((i) => ({
+          ...i,
+          visibleCount: Array.isArray(i.visibleTo) ? i.visibleTo.length : 0,
+        }));
+
+      materials = withVisibleCount(materials);
+      assignments = withVisibleCount(assignments);
+      questions = withVisibleCount(questions);
+      quizzes = withVisibleCount(quizzes);
+      // (groupAssignments usually don't have visibleTo)
+
+      // 5) Build topic map
       const topicMap = {};
-      topics.forEach(topic => {
-        topicMap[topic._id.toString()] = {
-          topic,
+      topics.forEach((t) => {
+        topicMap[t._id.toString()] = {
+          topic: t,
           materials: [],
           assignments: [],
           questions: [],
-          groupAssignments: [] ,   // ← new bucket
-          quizzes:[]
+          groupAssignments: [],
+          quizzes: [],
         };
       });
 
-      // 4) uncategorized bucket
+      // 6) Uncategorized bucket
       const uncategorized = {
         topic: { _id: null, title: "No topic" },
         materials: [],
         assignments: [],
         questions: [],
         groupAssignments: [],
-        quizzes:[]
-
+        quizzes: [],
       };
 
-      // 5) bucket everything
+      // 7) Bucket all
       bucket(materials, "materials", topicMap, uncategorized);
       bucket(assignments, "assignments", topicMap, uncategorized);
       bucket(questions, "questions", topicMap, uncategorized);
       bucketGroupAssignments(groupAssignments, "groupAssignments", topicMap, uncategorized);
-      bucket(quizzes,"quizzes",topicMap,uncategorized)
+      bucket(quizzes, "quizzes", topicMap, uncategorized);
 
-      // 6) sort each array by date desc
-      const sortByDate = (a, b) =>
-        new Date(b.updatedAt || b.createdAt) -
-        new Date(a.updatedAt || a.createdAt);
+      // 8) Sort by last activity desc
+      const sortByDateDesc = (a, b) =>
+        new Date(b.updatedAt || b.createdAt).getTime() -
+        new Date(a.updatedAt || a.createdAt).getTime();
 
-      Object.values(topicMap).forEach(g => {
-        g.materials.sort(sortByDate);
-        g.assignments.sort(sortByDate);
-        g.questions.sort(sortByDate);
-        g.groupAssignments.sort(sortByDate);
-        g.quizzes.sort(sortByDate);
+      Object.values(topicMap).forEach((group) => {
+        group.materials.sort(sortByDateDesc);
+        group.assignments.sort(sortByDateDesc);
+        group.questions.sort(sortByDateDesc);
+        group.groupAssignments.sort(sortByDateDesc);
+        group.quizzes.sort(sortByDateDesc);
       });
-      uncategorized.materials.sort(sortByDate);
-      uncategorized.assignments.sort(sortByDate);
-      uncategorized.questions.sort(sortByDate);
-      uncategorized.groupAssignments.sort(sortByDate);
-      uncategorized.quizzes.sort(sortByDate)
+      uncategorized.materials.sort(sortByDateDesc);
+      uncategorized.assignments.sort(sortByDateDesc);
+      uncategorized.questions.sort(sortByDateDesc);
+      uncategorized.groupAssignments.sort(sortByDateDesc);
+      uncategorized.quizzes.sort(sortByDateDesc);
 
-      // 7) assemble final result
+      // 9) Assemble result (include uncategorized if non-empty)
       let result = Object.values(topicMap);
       if (
         uncategorized.materials.length ||
         uncategorized.assignments.length ||
         uncategorized.questions.length ||
         uncategorized.groupAssignments.length ||
-        uncategorized.quizzes.length 
+        uncategorized.quizzes.length
       ) {
-        result.push(uncategorized);
+        result = [...result, uncategorized];
       }
 
       res.json(result);
-
     } catch (err) {
-      console.error(err);
+      console.error("Feed error:", err);
       res.status(500).json({ error: err.message });
     }
   }
