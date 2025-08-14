@@ -6,21 +6,34 @@ const notificationSchema = new Schema({
   type: {
     type: String,
     enum: [
-      "material", "announcement", "assignment", "group-assignment", "quiz", "comment","question",
+      "material",
+      "announcement",
+      "assignment",
+      "group-assignment",
+      "quiz",
+      "comment",
+      "question",
+      "assignment-submission",
+      "group-assignment-submission",
+      "question-submission"
     ],
     required: true
   },
-  refId: { type: Schema.Types.ObjectId, required: true }, // ID of the related item
-  title: { type: String }, // Short description
-  message: { type: String }, // Body/message
+  refId: { type: Schema.Types.ObjectId, required: true }, // ID of related item
+
+  title: { type: String }, 
+  message: { type: String },
+
+  // --- New: Who submitted ---
+  submittedByUser: { type: Schema.Types.ObjectId, ref: "User" }, // For individual submissions
+  submittedByGroup: { type: Schema.Types.ObjectId, ref: "Group" }, // For group submissions
+
   createdBy: { type: Schema.Types.ObjectId, ref: "User" },
   createdAt: { type: Date, default: Date.now },
-  recipients: [{ type: Schema.Types.ObjectId, ref: "User" }], // who should see
-  readBy: [{ type: Schema.Types.ObjectId, ref: "User" }], // who has read
-  // Optionally: add more metadata fields
-  archivedBy: [{ type: Schema.Types.ObjectId, ref: "User" }], // Array: who has archived
-  // OR
-  archived: { type: Boolean, default: false },
+  recipients: [{ type: Schema.Types.ObjectId, ref: "User" }],
+  readBy: [{ type: Schema.Types.ObjectId, ref: "User" }],
+  archivedBy: [{ type: Schema.Types.ObjectId, ref: "User" }],
+  archived: { type: Boolean, default: false }
 });
 
 export default mongoose.models.Notification ||

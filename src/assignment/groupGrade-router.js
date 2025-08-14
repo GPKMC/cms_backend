@@ -36,7 +36,15 @@ GroupGradeRouter.patch(
         return res.status(403).json({ error: "Not authorized for this group assignment." });
       }
 
-      if (typeof acceptingSubmissions === "boolean") ga.acceptingSubmissions = acceptingSubmissions;
+      if (typeof acceptingSubmissions === "boolean") {
+        ga.acceptingSubmissions = acceptingSubmissions;
+
+        // ✅ If teacher is reopening, clear the closeAt date
+        if (acceptingSubmissions === true) {
+          ga.closeAt = null;
+        }
+      }
+
       if (closeNow === true) {
         ga.acceptingSubmissions = false;
         ga.closeAt = new Date();
@@ -60,6 +68,7 @@ GroupGradeRouter.patch(
     }
   }
 );
+
 
 /**
  * GET /teacher/group-assignments/:gaId/groups

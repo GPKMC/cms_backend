@@ -402,30 +402,50 @@ GroupAssignmentRouter.delete('/:groupAssignmentId/group/:groupId', authmiddlewar
 });
 
 // GET /group-assignment/:id
+GroupAssignmentRouter.get("/:id", authmiddleware, async (req, res) => {
+  try {
+    const ga = await groupAssignmentModel
+      .findById(req.params.id)
+      .select(
+        "title content postedBy courseInstance topic dueDate media documents links youtubeLinks groups points createdAt acceptingSubmissions closeAt"
+      )
+      .populate("postedBy", "username email")
+      .populate("courseInstance", "course batch")
+      .populate("groups.members", "username email")
+      .populate("groups.discussion.user", "username email")
+      .populate("groups.participation.user", "username email")
+      .populate("topic", "title");
 
-GroupAssignmentRouter.get(
-  "/:id",
-  authmiddleware,
-  async (req, res) => {
-    try {
-      const assignment = await groupAssignmentModel
-        .findById(req.params.id)
-        .populate("postedBy", "username email")
-        .populate("courseInstance", "course batch")
-        .populate("groups.members", "username email")
-        .populate("groups.discussion.user", "username email")   // <-- ADD THIS LINE
-        .populate("groups.participation.user", "username email")// <-- AND THIS LINE
-        .populate("topic", "title");
-      if (!assignment) {
-        return res.status(404).json({ success: false, message: "Assignment not found" });
-      }
-      res.json({ success: true, assignment });
-    } catch (err) {
-      console.error(err);
-      res.status(500).json({ success: false, message: err.message });
-    }
+    if (!ga) return res.status(404).json({ success: false, message: "Assignment not found" });
+
+    return res.json({
+      success: true,
+      assignment: {
+        _id: ga._id,
+        title: ga.title,
+        content: ga.content,
+        postedBy: ga.postedBy,
+        courseInstance: ga.courseInstance,
+        topic: ga.topic,
+        dueDate: ga.dueDate,
+        media: ga.media,
+        documents: ga.documents,
+        links: ga.links,
+        youtubeLinks: ga.youtubeLinks,
+        groups: ga.groups,
+        points: ga.points,
+        createdAt: ga.createdAt,
+        // 👇 important for the student UI
+        acceptingSubmissions: ga.acceptingSubmissions === true,
+        closeAt: ga.closeAt ?? null,
+      },
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false, message: err.message });
   }
-);
+});
+
 
 
 // PATCH /:id — Update a group assignment (full, including files & per-group resources)

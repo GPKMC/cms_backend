@@ -395,59 +395,57 @@ groupAssignmentSubmissionRouter.delete('/:submissionId/unsubmit',
       const { submissionId } = req.params;
       const userId = req.user._id;
 
-      // --- Logging for debug ---
-      console.log('DELETE group assignment submission:', { submissionId, userId });
+      console.log('DELETE (soft unsubmit) group assignment submission:', { submissionId, userId });
 
-      // --- Find the submission ---
       const submission = await groupSubmissionModel.findById(submissionId);
       if (!submission) {
-        console.log('❌ Submission not found for ID:', submissionId);
         return res.status(404).json({ error: 'Submission not found.' });
       }
-      console.log('✅ Submission found:', submission._id);
 
-      // --- Find the related group assignment ---
       const groupAssignment = await groupAssignmentModel.findById(submission.groupAssignmentId);
       if (!groupAssignment) {
-        console.log('❌ GroupAssignment not found for ID:', submission.groupAssignmentId);
         return res.status(404).json({ error: 'Group assignment not found.' });
       }
-      console.log('✅ GroupAssignment found:', groupAssignment._id);
 
-      // --- Find group in assignment ---
       const group = groupAssignment.groups.find(
         g =>
           (g._id?.toString?.() === submission.groupId?.toString?.()) ||
           (g.id?.toString?.() === submission.groupId?.toString?.())
       );
       if (!group) {
-        console.log('❌ Group not found in assignment. Submission groupId:', submission.groupId);
         return res.status(404).json({ error: 'Group not found in assignment.' });
       }
-      console.log('✅ Group found:', group.name || group._id);
 
-      // --- Check if user is in group.members ---
       const isMember = (group.members || []).some(
         m => m.toString() === userId.toString()
       );
       if (!isMember) {
-        console.log('❌ User is not a member of this group:', userId);
         return res.status(403).json({ error: 'You are not authorized to unsubmit this assignment.' });
       }
-      console.log('✅ User is authorized to unsubmit.');
 
-      // --- Perform deletion ---
-      await groupSubmissionModel.deleteOne({ _id: submissionId });
-      console.log('✅ Submission deleted:', submissionId);
+      // ✅ Soft unsubmit: clear grade/feedback and reset submission status
+      await groupSubmissionModel.updateOne(
+        { _id: submissionId },
+        {
+          $unset: { feedback: "", grade: "" },         // remove grade & feedback
+          $set: {
+            status: "draft",                           // back to draft
+            submittedAt: null,                         // clear submitted time
+            plagiarismPercentage: 0,                   // optional: reset plagiarism fields
+            plagiarismDetails: [],
+            isFlagged: false
+          }
+        }
+      );
 
-      return res.status(200).json({ message: 'Submission unsubmitted (deleted) successfully.' });
-
+      return res.status(200).json({ message: 'Submission reverted to draft and feedback/grade cleared.' });
     } catch (err) {
-      console.error('❌ Error in group assignment submission DELETE:', err);
+      console.error('❌ Error in group assignment submission unsubmit:', err);
       return res.status(500).json({ error: 'Internal server error.' });
     }
   }
 );
+
 
 // --- GET by ID --- (unchanged)
 groupAssignmentSubmissionRouter.get('/:submissionId', authmiddleware, authorizedRole("student"), async (req, res) => {
@@ -493,5 +491,6 @@ groupAssignmentSubmissionRouter.get(
     }
   }
 );
+
 
 export default groupAssignmentSubmissionRouter;
