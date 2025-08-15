@@ -1,3 +1,4 @@
+//this file is for fetching all types of assignment based on topic and this is for teacher only
 import mongoose from "mongoose";
 import express from "express";
 import { authmiddleware, authorizedRole } from "../users/user-middleware.js";
@@ -108,7 +109,7 @@ FeedRouter.get(
         quizquestionModel
           .find({ ...baseCourseFilter, ...visibleToFilter })
           .populate("postedBy", "username email")
-          .populate("visibleTo", "_id")
+        
           .lean(),
       ]);
 
