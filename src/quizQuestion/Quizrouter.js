@@ -1,4 +1,4 @@
-// routes/quizRouter.js
+// quizQuestion/quizRouter.js
 import express from "express";
 import { body, param, validationResult } from "express-validator";
 import QuizQuestion from "./quizquestion-model.js";
@@ -79,6 +79,43 @@ QuizRouter.post(
   }
 );
 
+// ─── Optional: list all quizzes for a course ───────────
+QuizRouter.get(
+  "/course/:courseInstanceId",
+  authmiddleware,
+  authorizedRole("student", "teacher", "admin"),
+  param("courseInstanceId").isMongoId(),
+  validate,
+  async (req, res, next) => {
+    try {
+      const qs = await QuizQuestion.find({ courseInstance: req.params.courseInstanceId })
+        .select("title description dueDate published questions postedBy topic createdAt updatedAt")
+        .populate("postedBy", "username role _id")
+        .populate("topic", "title _id")
+        .lean();
+
+      const items = qs.map(q => ({
+        _id: q._id,
+        type: "quiz",
+        title: q.title,
+        previewHtml: q.description || "",
+        description: q.description || "",
+        questionCount: (q.questions || []).length,
+        published: !!q.published,
+        dueAt: q.dueDate || null,
+        postedBy: q.postedBy,
+        topic: q.topic,
+        createdAt: q.createdAt,
+        updatedAt: q.updatedAt,
+      }));
+
+      res.json({ items });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
 // ─── 2) Fetch a quiz ──────────────────────
 QuizRouter.get(
   "/:quizId",
@@ -96,7 +133,7 @@ QuizRouter.get(
   }
 );
 
-// ─── 3) Update quiz metadata (title/description/dueDate) ───────────
+// ─── 3) Update quiz metadata ──────────────
 QuizRouter.patch(
   "/:quizId",
   authmiddleware,
@@ -148,7 +185,7 @@ QuizRouter.patch(
   }
 );
 
-// ─── 5) Add an MCQ to a quiz ──────────────
+// ─── 5) Add MCQ ───────────────────────────
 QuizRouter.post(
   "/:quizId/questions",
   authmiddleware,
@@ -186,8 +223,7 @@ QuizRouter.post(
   }
 );
 
-// ─── 6) Update a question (text/points/feedback/options/correct) ───
-//     NOTE: This single route handles *both* full edits and "correct option only" edits.
+// ─── 6) Update a question ──────────────────
 QuizRouter.patch(
   "/:quizId/questions/:questionId",
   authmiddleware,
@@ -226,19 +262,17 @@ QuizRouter.patch(
 
       if (Array.isArray(options)) {
         if (isPublished || hasSubs) {
-          // strict: update text only, no add/remove
+          // strict: update text only
           if (options.length !== q.options.length) {
             return res.status(400).json({
-              message:
-                "Cannot add/remove options after publish or once submissions exist.",
+              message: "Cannot add/remove options after publish or once submissions exist.",
             });
           }
           const existingIds = new Set(q.options.map((o) => String(o._id)));
           for (const incoming of options) {
             if (!incoming._id || !existingIds.has(String(incoming._id))) {
               return res.status(400).json({
-                message:
-                  "All provided options must include existing _id in strict mode.",
+                message: "All provided options must include existing _id in strict mode.",
               });
             }
           }
@@ -248,7 +282,7 @@ QuizRouter.patch(
             if (typeof newText === "string") opt.text = newText;
           });
         } else {
-          // flexible: replace array, preserving _id where provided
+          // flexible: replace array
           const existingMap = new Map(q.options.map((o) => [String(o._id), o]));
           q.options = options.map((o) => {
             if (o._id && existingMap.has(String(o._id))) {
@@ -256,12 +290,7 @@ QuizRouter.patch(
             }
             return { text: o.text };
           });
-
-          // if old correctOption no longer exists, clear it
-          if (
-            q.correctOption &&
-            !q.options.some((o) => String(o._id) === String(q.correctOption))
-          ) {
+          if (q.correctOption && !q.options.some((o) => String(o._id) === String(q.correctOption))) {
             q.correctOption = undefined;
           }
         }
@@ -270,9 +299,7 @@ QuizRouter.patch(
       if (typeof correctOption === "string") {
         const exists = q.options.some((o) => String(o._id) === String(correctOption));
         if (!exists) {
-          return res
-            .status(400)
-            .json({ message: "correctOption must be one of the current option IDs." });
+          return res.status(400).json({ message: "correctOption must be one of the current option IDs." });
         }
         q.correctOption = correctOption;
       }
@@ -286,84 +313,7 @@ QuizRouter.patch(
   }
 );
 
-// ─── 7) Get-or-create submission (student) ─────
-QuizRouter.get(
-  "/:quizId/submission",
-  authmiddleware,
-  authorizedRole("student"),
-  param("quizId").isMongoId(),
-  validate,
-  async (req, res, next) => {
-    try {
-      const quiz = await QuizQuestion.findById(req.params.quizId);
-      if (!quiz) return res.status(404).json({ message: "Quiz not found" });
-
-      let sub = await Submission.findOne({
-        quiz: quiz._id,
-        student: req.user._id,
-      });
-      if (!sub) {
-        sub = await Submission.create({
-          quiz: quiz._id,
-          student: req.user._id,
-          answers: [],
-        });
-      }
-      res.json(sub);
-    } catch (err) {
-      next(err);
-    }
-  }
-);
-
-// ─── 8) Submit answers + auto-score (student) ──
-QuizRouter.post(
-  "/:quizId/submit",
-  authmiddleware,
-  authorizedRole("student"),
-  [
-    param("quizId").isMongoId(),
-    body("answers").isArray({ min: 1 }),
-    body("answers.*.question").isMongoId(),
-    body("answers.*.selectedOption").isMongoId(),
-  ],
-  validate,
-  async (req, res, next) => {
-    try {
-      const quiz = await QuizQuestion.findById(req.params.quizId);
-      if (!quiz) return res.status(404).json({ message: "Quiz not found" });
-
-      let total = 0;
-      const graded = quiz.questions.map((q) => {
-        const ans = req.body.answers.find((a) => a.question === String(q._id)) || {};
-        const earned = String(q.correctOption) === ans.selectedOption ? q.points : 0;
-        total += earned;
-        return {
-          question: q._id,
-          selectedOption: ans.selectedOption,
-          earnedPoints: earned,
-          feedback: earned === q.points ? q.feedbackCorrect : q.feedbackIncorrect,
-        };
-      });
-
-      const sub = await Submission.findOneAndUpdate(
-        { quiz: quiz._id, student: req.user._id },
-        {
-          answers: graded,
-          totalScore: total,
-          status: "submitted",
-          submittedAt: new Date(),
-        },
-        { upsert: true, new: true }
-      );
-      res.json(sub);
-    } catch (err) {
-      next(err);
-    }
-  }
-);
-
-// ─── 9) Delete a quiz (and its submissions) ────
+// ─── 9) Delete a quiz ──────────────────────
 QuizRouter.delete(
   "/:quizId",
   authmiddleware,
@@ -385,7 +335,7 @@ QuizRouter.delete(
   }
 );
 
-// ─── 10) Delete a single question ──────────────
+// ─── 10) Delete a single question ──────────
 QuizRouter.delete(
   "/:quizId/questions/:questionId",
   authmiddleware,
