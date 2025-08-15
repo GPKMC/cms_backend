@@ -47,6 +47,8 @@ import AttendanceRouter from './attendance/attendance-routes.js';
 import gradingRouter from './question/gradingrouter.js';
 import assignmentGradeRouter from './assignment/assignmentGrade-router.js';
 import GroupGradeRouter from './assignment/groupGrade-router.js';
+import GradesRouter from './grade/overallGrade-routes.js';
+import teacherAssignmentRouter from './teacherRoutes/overallAssignment.js';
 
 // ====== Connect DB ======
 await connectDB(); // if connectDB() isn't async, remove await
@@ -141,6 +143,9 @@ app.use('/assignmentFeed', StudentProgressRouter);
 app.use("/grading", gradingRouter);
 app.use("/assignmentgrading", assignmentGradeRouter);
 app.use("/groupassignmentgrading", GroupGradeRouter);
+app.use("/grade", GradesRouter);
+app.use("/overallAssignment", teacherAssignmentRouter);
+
 
 // ⚠️ Attendance router mounted at /attendance.
 // Ensure the router's internal paths are like "/sessions", NOT "/attendance/sessions".
