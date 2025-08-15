@@ -1,4 +1,4 @@
-// routes/quizSubmissionRouter.js
+// quizQuestion/submission-router.js
 import express from 'express';
 import { body, param, query, validationResult } from 'express-validator';
 import QuizSubmission from './submission-model.js';
@@ -7,7 +7,6 @@ import { authmiddleware, authorizedRole } from '../users/user-middleware.js';
 
 const QuizSubmissionrouter = express.Router();
 
-/** Validate incoming request fields */
 function validate(req, res, next) {
   const errs = validationResult(req);
   if (!errs.isEmpty()) {
@@ -16,18 +15,11 @@ function validate(req, res, next) {
   next();
 }
 
-/**
- * Load submission by ID and ensure that:
- * - students only access their own
- * - teachers can access any
- */
 async function ensureOwnerOrTeacher(req, res, next) {
   try {
     const sub = await QuizSubmission.findById(req.params.id);
-    if (!sub) {
-      return res.status(404).json({ message: 'Submission not found' });
-    }
-    if (req.user.role === 'student' && sub.student.toString() !== req.user.id) {
+    if (!sub) return res.status(404).json({ message: 'Submission not found' });
+    if (req.user.role === 'student' && String(sub.student) !== String(req.user.id)) {
       return res.status(403).json({ message: 'Forbidden' });
     }
     req.submission = sub;
@@ -37,12 +29,7 @@ async function ensureOwnerOrTeacher(req, res, next) {
   }
 }
 
-/**
- * POST /quiz-submissions
- * Start (or fetch) one submission per (quiz, student)
- * Access: student
- */
-
+/** Start (or fetch) a submission */
 QuizSubmissionrouter.post(
   '/',
   authmiddleware,
@@ -52,21 +39,15 @@ QuizSubmissionrouter.post(
   async (req, res, next) => {
     const student = req.user.id;
     const { quiz } = req.body;
-
     try {
-      // 1) Already started?
       let submission = await QuizSubmission.findOne({ quiz, student });
       if (submission) {
         return res.status(200).json({ message: 'Already started', submission });
       }
-
-      // 2) Create new
-      submission = await QuizSubmission.create({ quiz, student });
+      submission = await QuizSubmission.create({ quiz, student }); // defaults: status: 'draft'
       return res.status(201).json(submission);
-
     } catch (err) {
-      // 3) Race will hit unique‐index error → fetch & return existing
-      if (err.code === 11000) {
+      if (err?.code === 11000) {
         const dup = await QuizSubmission.findOne({ quiz, student });
         return res.status(200).json({ submission: dup });
       }
@@ -75,52 +56,37 @@ QuizSubmissionrouter.post(
   }
 );
 
-/**
- * GET /quiz-submissions
- * List submissions:
- *  - students get only their own
- *  - teachers may pass ?studentId=XYZ to fetch that student's
- * Access: student, teacher
- */
-// routes/quizSubmissionRouter.js
+/** List submissions (teacher or student) */
+// routes/quizSubmissionRouter.js  (only this handler changed)
 QuizSubmissionrouter.get(
- '/:id',
+  '/',
   authmiddleware,
-  authorizedRole('student','teacher'),
-  param('id').isMongoId().withMessage('Invalid submission id'),
+  authorizedRole('student', 'teacher'),
+  [
+    query('quiz').optional().isMongoId(),
+    query('studentId').optional().isMongoId(),
+    query('status').optional().isIn(['draft', 'submitted']),
+  ],
   validate,
   async (req, res, next) => {
     try {
-      // 1) Load the submission (answers.question is just an ObjectId here)
-      const sub = await QuizSubmission.findById(req.params.id).lean();
-      if (!sub) return res.status(404).json({ message: 'Not found' });
+      const { quiz, studentId, status } = req.query;
+      const filter = {};
+      if (quiz) filter.quiz = quiz;
+      if (status) filter.status = status;
 
-      // 2) Authorization: students only their own
-      if (req.user.role === 'student' && sub.student.toString() !== req.user.id) {
-        return res.status(403).json({ message: 'Forbidden' });
+      if (req.user.role === 'student') {
+        filter.student = req.user.id; // student can only see their own
+      } else if (studentId) {
+        filter.student = studentId;
       }
 
-      // 3) Load the quiz document (with questions[])
-      const quiz = await QuizQuestion.findById(sub.quiz).lean();
-      if (!quiz) return res.status(500).json({ message: 'Quiz not found' });
+      const items = await QuizSubmission.find(filter)
+        .select('_id quiz student status totalScore submittedAt createdAt updatedAt')
+        .populate('student', 'username email')   // ← add this
+        .lean();
 
-      // 4) Merge each answer with its matching question sub-doc
-      const answers = sub.answers.map(ans => {
-        const question = quiz.questions.find(q =>
-          q._id.toString() === ans.question?.toString()
-        ) || null;
-        return { 
-          ...ans,
-          question 
-        };
-      });
-
-      // 5) Return a single object with populated quiz and answers.question
-      return res.json({
-        ...sub,
-        quiz,
-        answers
-      });
+      res.json(items);
     } catch (err) {
       next(err);
     }
@@ -128,11 +94,28 @@ QuizSubmissionrouter.get(
 );
 
 
-/**
- * GET /quiz-submissions/:id
- * Fetch one submission (with answers, score, any feedback)
- * Access: student (own only), teacher (any)
- */
+/** Stats for a quiz (teacher) */
+QuizSubmissionrouter.get(
+  '/stats',
+  authmiddleware,
+  authorizedRole('teacher'),
+  [query('quizId').isMongoId().withMessage('quizId is required')],
+  validate,
+  async (req, res, next) => {
+    try {
+      const { quizId } = req.query;
+      const [submittedCount, startedCount] = await Promise.all([
+        QuizSubmission.countDocuments({ quiz: quizId, status: 'submitted' }),
+        QuizSubmission.countDocuments({ quiz: quizId }),
+      ]);
+      res.json({ submittedCount, startedCount });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+/** Get a single submission (safe for students pre-submit) */
 QuizSubmissionrouter.get(
   '/:id',
   authmiddleware,
@@ -142,26 +125,33 @@ QuizSubmissionrouter.get(
   ensureOwnerOrTeacher,
   async (req, res, next) => {
     try {
-      const sub = req.submission;
-      // Populate fields if needed
-      if (!sub.populated('quiz')) {
-        await sub.populate({ path: 'quiz', model: 'QuizQuestion' });
+      const subDoc = req.submission.toObject();
+      const quiz = await QuizQuestion.findById(subDoc.quiz).lean();
+      if (!quiz) return res.status(500).json({ message: 'Quiz not found' });
+
+      // Hide correct answers for students until submitted
+      const hideCorrect = (req.user.role === 'student' && subDoc.status !== 'submitted');
+      if (hideCorrect && Array.isArray(quiz.questions)) {
+        quiz.questions = quiz.questions.map(q => {
+          const { correctOption, ...rest } = q; // strip
+          return rest;
+        });
       }
-      if (!sub.populated('answers.question')) {
-        await sub.populate({ path: 'answers.question', model: 'QuizQuestion' });
-      }
-      res.json(sub);
+
+      const answers = (subDoc.answers || []).map((ans) => {
+        const question =
+          (quiz.questions || []).find(q => String(q._id) === String(ans.question)) || null;
+        return { ...ans, question };
+      });
+
+      res.json({ ...subDoc, quiz, answers });
     } catch (err) {
       next(err);
     }
   }
 );
 
-/**
- * PATCH /quiz-submissions/:id/answers
- * Update answers for an in-progress submission
- * Access: student (own only)
- */
+/** Update answers (draft) */
 QuizSubmissionrouter.patch(
   '/:id/answers',
   authmiddleware,
@@ -185,11 +175,7 @@ QuizSubmissionrouter.patch(
   }
 );
 
-/**
- * POST /quiz-submissions/:id/submit
- * Finalize submission: auto-score and mark submitted
- * Access: student (own only)
- */
+/** Final submit: autoscore */
 QuizSubmissionrouter.post(
   '/:id/submit',
   authmiddleware,
@@ -204,18 +190,15 @@ QuizSubmissionrouter.post(
         return res.status(400).json({ message: 'Quiz already submitted' });
       }
 
-      // Load quiz to score answers
       const quizDoc = await QuizQuestion.findById(sub.quiz);
-      if (!quizDoc) {
-        return res.status(500).json({ message: 'Quiz not found for scoring' });
-      }
+      if (!quizDoc) return res.status(500).json({ message: 'Quiz not found for scoring' });
 
       let total = 0;
-      sub.answers = sub.answers.map(ans => {
-        const q = quizDoc.questions.find(
-          (qq) => qq._id.toString() === ans.question.toString()
+      sub.answers = (sub.answers || []).map((ans) => {
+        const q = (quizDoc.questions || []).find(
+          (qq) => String(qq._id) === String(ans.question)
         );
-        const earned = q && ans.selectedOption === q.correctOption ? q.points : 0;
+        const earned = q && String(ans.selectedOption) === String(q.correctOption) ? q.points : 0;
         ans.earnedPoints = earned;
         total += earned;
         return ans;
@@ -233,11 +216,7 @@ QuizSubmissionrouter.post(
   }
 );
 
-/**
- * PATCH /quiz-submissions/:id/feedback
- * (Teacher only) Add earnedPoints and teacherFeedback per answer
- * Access: teacher
- */
+/** Teacher feedback / override points */
 QuizSubmissionrouter.patch(
   '/:id/feedback',
   authmiddleware,
@@ -250,18 +229,12 @@ QuizSubmissionrouter.patch(
     try {
       const sub = req.submission;
       for (const upd of req.body.answers) {
-        const ans = sub.answers.find(
-          (a) => a.question.toString() === upd.question
-        );
+        const ans = sub.answers.find((a) => String(a.question) === String(upd.question));
         if (!ans) continue;
-        if (typeof upd.earnedPoints === 'number') {
-          ans.earnedPoints = upd.earnedPoints;
-        }
-        if (typeof upd.teacherFeedback === 'string') {
-          ans.teacherFeedback = upd.teacherFeedback;
-        }
+        if (typeof upd.earnedPoints === 'number') ans.earnedPoints = upd.earnedPoints;
+        if (typeof upd.teacherFeedback === 'string') ans.teacherFeedback = upd.teacherFeedback;
       }
-      sub.totalScore = sub.answers.reduce((sum, a) => sum + a.earnedPoints, 0);
+      sub.totalScore = sub.answers.reduce((sum, a) => sum + (a.earnedPoints || 0), 0);
       await sub.save();
       res.json(sub);
     } catch (err) {
