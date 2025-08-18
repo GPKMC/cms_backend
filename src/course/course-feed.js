@@ -1,4 +1,4 @@
-//this file is for fetching all types of assignment based on topic and this is for teacher only
+// this file is for fetching all types of assignment based on topic
 import mongoose from "mongoose";
 import express from "express";
 import { authmiddleware, authorizedRole } from "../users/user-middleware.js";
@@ -33,7 +33,7 @@ function bucketGroupAssignments(groupAssignments, arrName, topicMap, uncategoriz
       documents: asg.documents,
       youtubeLinks: asg.youtubeLinks,
       links: asg.links,
-      groups: asg.groups, // entire groups array; front-end can decide how to display
+      groups: asg.groups, // entire groups array
       groupCount: Array.isArray(asg.groups) ? asg.groups.length : 0,
       postedBy: asg.postedBy,
       createdAt: asg.createdAt,
@@ -52,6 +52,8 @@ FeedRouter.get(
   authorizedRole("teacher", "student"),
   async (req, res) => {
     const { courseInstanceId } = req.params;
+    const { quizStatus = "all" } = req.query; // all | published | draft (optional)
+
     if (!mongoose.Types.ObjectId.isValid(courseInstanceId)) {
       return res.status(400).json({ error: "Invalid courseInstanceId" });
     }
@@ -60,33 +62,63 @@ FeedRouter.get(
     const userId = req.user?._id?.toString?.();
 
     try {
-      // 1) Topics (shared)
+      // 1) Topics
       const topics = await topicModel.find({ courseInstance: courseInstanceId }).lean();
 
-      // 2) Build per-role queries
-      // Teachers: see everything within the courseInstance
+      // 2) Base filters
       const baseCourseFilter = { courseInstance: courseInstanceId };
 
-      // Students: public (no visibleTo) OR includes the student id
-      // NOTE: $size:0 only matches [] when the field exists; pair with $exists:false.
+      // Students: items visible to all or specifically to the student
       const visibleToFilter = isTeacher
-        ? {} // no visibility restriction for teachers
+        ? {}
         : {
             $or: [
               { visibleTo: { $exists: false } },
               { visibleTo: { $size: 0 } },
-              { visibleTo: userId }, // Mongoose will cast userId to ObjectId
+              { visibleTo: userId },
             ],
           };
 
-      // Group assignments:
-      // Teachers: all group assignments in the course.
-      // Students: only group assignments where any group's members include the student.
+      // Group assignments filter
       const groupAssignmentFilter = isTeacher
         ? baseCourseFilter
         : { ...baseCourseFilter, "groups.members": userId };
 
-      // 3) Fetch everything in parallel (role-aware)
+      // --- Quiz filter logic ---
+      // Teachers => see both draft and published by default
+      // Students => only published by default
+    // --- Quiz filter logic (safe) ---
+const quizFilter = {
+  ...baseCourseFilter,
+  ...(isTeacher ? {} : visibleToFilter),
+};
+
+if (isTeacher) {
+  // Teachers can choose what to see
+  if (quizStatus === "published") {
+    quizFilter.$or = [{ published: true }, { isPublished: true }];
+  } else if (quizStatus === "draft") {
+    quizFilter.$or = [{ published: false }, { isPublished: false }];
+  }
+  // quizStatus === "all" (default) -> no $or => both draft & published
+} else {
+  // Students ALWAYS only see published, regardless of query string
+  quizFilter.$or = [{ published: true }, { isPublished: true }];
+}
+
+
+      // Allow optional override via ?quizStatus=published|draft|all
+      if (quizStatus === "published" || (!isTeacher && quizStatus === "all")) {
+        // For students, treat "all" as "published" for safety
+        quizFilter.$or = [{ published: true }, { isPublished: true }];
+      } else if (quizStatus === "draft") {
+        quizFilter.$or = [{ published: false }, { isPublished: false }];
+      } else {
+        // quizStatus === "all" and teacher -> no $or, return both
+        // nothing to add
+      }
+
+      // 3) Fetch in parallel (role-aware)
       let [materials, assignments, questions, groupAssignments, quizzes] = await Promise.all([
         courseMaterialsModel
           .find({ ...baseCourseFilter, ...visibleToFilter })
@@ -107,13 +139,13 @@ FeedRouter.get(
           .populate("postedBy", "username email")
           .lean(),
         quizquestionModel
-          .find({ ...baseCourseFilter, ...visibleToFilter })
+          .find(quizFilter)
           .populate("postedBy", "username email")
-        
+          .populate("topic", "title _id")
           .lean(),
       ]);
 
-      // 4) Add visibleCount (for everything that has visibleTo)
+      // 4) Add visibleCount where applicable
       const withVisibleCount = (items) =>
         items.map((i) => ({
           ...i,
@@ -124,7 +156,6 @@ FeedRouter.get(
       assignments = withVisibleCount(assignments);
       questions = withVisibleCount(questions);
       quizzes = withVisibleCount(quizzes);
-      // (groupAssignments usually don't have visibleTo)
 
       // 5) Build topic map
       const topicMap = {};
@@ -149,7 +180,7 @@ FeedRouter.get(
         quizzes: [],
       };
 
-      // 7) Bucket all
+      // 7) Bucket everything
       bucket(materials, "materials", topicMap, uncategorized);
       bucket(assignments, "assignments", topicMap, uncategorized);
       bucket(questions, "questions", topicMap, uncategorized);

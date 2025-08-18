@@ -8,13 +8,53 @@ import questionSubmissionModel from "./questionSubmission-model.js";
 
 const gradingRouter = express.Router();
 
-/**
- * GET /grading/question/:id/stats
- * Returns roster + latest submission state broken into:
- * - assigned (no submission)
- * - turned in (submitted, not returned)
- * - graded (returned)
- */
+/* ---------- helpers to normalize preview data ---------- */
+function asArray(x) {
+  return Array.isArray(x) ? x : [];
+}
+function pickAttachments(s) {
+  const out = [];
+  const candidates = [
+    s.attachments,
+    s.files,
+    s.media,
+    s.documents,
+    s.answerFiles,
+    s.uploads,
+  ]
+    .map(asArray)
+    .filter((arr) => arr.length);
+
+  for (const arr of candidates) {
+    for (const f of arr) {
+      if (!f) continue;
+      if (typeof f === "string") out.push({ url: f });
+      else
+        out.push({
+          url: f.url || f.path || f.location || "",
+          originalname: f.originalname || f.name || f.filename,
+          filetype: f.filetype || f.mimetype || f.type,
+        });
+    }
+  }
+  return out;
+}
+function pickSnippet(s) {
+  return (
+    s.snippet ||
+    s.answerText || // << include the student's text answer
+    s.textAnswer ||
+    s.answer ||
+    (typeof s.content === "string" ? s.content : undefined) ||
+    s.extractedText ||
+    s.combinedText ||
+    undefined
+  );
+}
+
+/* =========================================================
+   GET /grading/question/:id/stats
+========================================================= */
 gradingRouter.get(
   "/question/:id/stats",
   authmiddleware,
@@ -26,11 +66,10 @@ gradingRouter.get(
         return res.status(400).json({ error: "Invalid question id" });
       }
 
-      // 1) Question
       const q = await questionModel.findById(id).lean();
       if (!q) return res.status(404).json({ error: "Question not found" });
 
-      // 2) Build roster: all students in the CI batch (adjust if you store roster differently)
+      // roster
       let rosterUsers = [];
       if (q.courseInstance) {
         const ci = await CourseInstance.findById(q.courseInstance)
@@ -44,27 +83,55 @@ gradingRouter.get(
         }
       }
 
-      // 3) Submissions for this question
+      // submissions for this question
       const subs = await questionSubmissionModel
         .find({ question: id })
-        .select("_id student grade submittedAt updatedAt createdAt isReturned")
+        .select(
+          [
+            "_id",
+            "student",
+            "grade",
+            "submittedAt",
+            "updatedAt",
+            "createdAt",
+            "isReturned",
+            "returnedAt",
+            // attachments candidates
+            "attachments",
+            "files",
+            "media",
+            "documents",
+            "answerFiles",
+            "uploads",
+            // text/snippet candidates
+            "snippet",
+            "answerText",
+            "textAnswer",
+            "answer",
+            "content",
+            "extractedText",
+            "combinedText",
+          ].join(" ")
+        )
         .populate({ path: "student", select: "_id username name email avatarUrl" })
         .lean();
 
-      // Keep last submission per student
-      const latestByStudent = new Map();
+      // pick latest per student
+      const latestByStudent = new Map(); // sid -> { s, t, atts, snip }
       for (const s of subs) {
         const sid = String(s.student?._id || s.student);
         const t = new Date(s.submittedAt || s.updatedAt || s.createdAt).getTime();
+        const atts = pickAttachments(s);
+        const snip = pickSnippet(s);
         const prev = latestByStudent.get(sid);
-        if (!prev || t > prev.t) latestByStudent.set(sid, { s, t });
+        if (!prev || t > prev.t) latestByStudent.set(sid, { s, t, atts, snip });
       }
 
-      // 4) Rows (one per roster student)
+      // rows for roster
       const rows = [];
       for (const st of rosterUsers) {
         const sid = String(st._id);
-        const hit = latestByStudent.get(sid)?.s;
+        const hit = latestByStudent.get(sid);
         rows.push({
           student: {
             _id: sid,
@@ -74,16 +141,17 @@ gradingRouter.get(
             avatarUrl: st.avatarUrl,
           },
           submitted: !!hit,
-          returned: !!hit?.isReturned,
-          submissionId: hit?._id ? String(hit._id) : null,
-          submittedAt: hit?.submittedAt || hit?.updatedAt || hit?.createdAt || null,
-          grade: hit?.grade ?? null,
-          attachments: [],
-          snippet: undefined,
+          returned: !!hit?.s?.isReturned,
+          submissionId: hit?.s?._id ? String(hit.s._id) : null,
+          submittedAt:
+            hit?.s?.submittedAt || hit?.s?.updatedAt || hit?.s?.createdAt || null,
+          grade: hit?.s?.grade ?? null,
+          attachments: hit?.atts || [],
+          snippet: hit?.snip,
         });
       }
 
-      // 5) (edge case) submitters not present in roster
+      // submitters not in roster
       for (const s of subs) {
         const sid = String(s.student?._id || s.student);
         if (!rows.find((r) => r.student._id === sid)) {
@@ -100,14 +168,15 @@ gradingRouter.get(
             submissionId: String(s._id),
             submittedAt: s.submittedAt || s.updatedAt || s.createdAt || null,
             grade: s.grade ?? null,
-            attachments: [],
+            attachments: pickAttachments(s),
+            snippet: pickSnippet(s),
           });
         }
       }
 
-      const gradedCount   = rows.filter((r) => r.submitted && r.returned).length;
+      const gradedCount = rows.filter((r) => r.submitted && r.returned).length;
       const turnedInCount = rows.filter((r) => r.submitted && !r.returned).length;
-      const rosterCount   = rows.length;
+      const rosterCount = rows.length;
       const assignedCount = Math.max(rosterCount - (gradedCount + turnedInCount), 0);
 
       res.json({
@@ -127,9 +196,9 @@ gradingRouter.get(
   }
 );
 
-/**
- * PATCH /grading/question/:id/accepting  { accepting: boolean }
- */
+/* =========================================================
+   PATCH /grading/question/:id/accepting  { accepting: boolean }
+========================================================= */
 gradingRouter.patch(
   "/question/:id/accepting",
   authmiddleware,
@@ -154,22 +223,53 @@ gradingRouter.patch(
   }
 );
 
-/**
- * POST /grading/question/:id/return  { submissionIds: string[] }
- * Sets isReturned = true (and returnedAt if you want)
- */
+/* =========================================================
+   POST /grading/question/:id/return   { submissionIds: string[] }
+========================================================= */
 gradingRouter.post(
   "/question/:id/return",
   authmiddleware,
   authorizedRole("teacher", "admin"),
   async (req, res) => {
     try {
+      const { id } = req.params;
       const { submissionIds = [] } = req.body || {};
-      if (!submissionIds.length) return res.json({ ok: true, modified: 0 });
+      if (!Array.isArray(submissionIds) || submissionIds.length === 0) {
+        return res.json({ ok: true, modified: 0 });
+      }
 
       const r = await questionSubmissionModel.updateMany(
-        { _id: { $in: submissionIds } },
+        { _id: { $in: submissionIds }, question: id },
         { $set: { isReturned: true, returnedAt: new Date() } },
+        { strict: false }
+      );
+
+      res.json({ ok: true, modified: r.modifiedCount || 0 });
+    } catch (e) {
+      console.error(e);
+      res.status(500).json({ error: "Internal server error" });
+    }
+  }
+);
+
+/* =========================================================
+   POST /grading/question/:id/unreturn   { submissionIds: string[] }
+========================================================= */
+gradingRouter.post(
+  "/question/:id/unreturn",
+  authmiddleware,
+  authorizedRole("teacher", "admin"),
+  async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { submissionIds = [] } = req.body || {};
+      if (!Array.isArray(submissionIds) || submissionIds.length === 0) {
+        return res.json({ ok: true, modified: 0 });
+      }
+
+      const r = await questionSubmissionModel.updateMany(
+        { _id: { $in: submissionIds }, question: id },
+        { $set: { isReturned: false }, $unset: { returnedAt: 1 } },
         { strict: false }
       );
 
