@@ -445,50 +445,6 @@ announcementRoutes.patch("/:id", authmiddleware, authorizedRole("admin"), async 
     const { id } = req.params;
     if (!isId(id)) return res.status(400).json({ error: "Invalid id" });
 
-    // Load current doc to compute effective dates
-    const current = await Announcement.findOne({ _id: id, isDeleted: false }).lean();
-    if (!current) return res.status(404).json({ error: "Not found" });
-
-    // Normalize incoming date fields
-    const hasPublishAt = Object.prototype.hasOwnProperty.call(req.body, "publishAt");
-    const hasExpiresAt = Object.prototype.hasOwnProperty.call(req.body, "expiresAt");
-    const normalize = (v) => (v === "" ? null : v);
-
-    if (hasPublishAt) req.body.publishAt = normalize(req.body.publishAt);
-    if (hasExpiresAt) req.body.expiresAt = normalize(req.body.expiresAt);
-
-    // Effective values (mix of existing + incoming)
-    const nextPublishAtRaw = hasPublishAt ? req.body.publishAt : current.publishAt;
-    const nextExpiresAtRaw = hasExpiresAt ? req.body.expiresAt : current.expiresAt;
-
-    const toDate = (v) => (v == null ? null : new Date(v));
-    const pubDate = toDate(nextPublishAtRaw);
-    const expDate = toDate(nextExpiresAtRaw);
-
-    // Basic date validity checks (only if provided)
-    if (hasPublishAt && pubDate && isNaN(pubDate.getTime())) {
-      return res.status(400).json({ error: "Invalid publishAt date/time." });
-    }
-    if (hasExpiresAt && expDate && isNaN(expDate.getTime())) {
-      return res.status(400).json({ error: "Invalid expiresAt date/time." });
-    }
-
-    const nowTs = Date.now();
-
-    // Business rules
-    if (hasPublishAt && pubDate && pubDate.getTime() < nowTs) {
-      return res.status(400).json({ error: "Publish date/time cannot be in the past." });
-    }
-    if (hasExpiresAt && expDate && expDate.getTime() < nowTs) {
-      return res.status(400).json({ error: "Expires date/time cannot be in the past." });
-    }
-    if (pubDate && expDate && expDate.getTime() < pubDate.getTime()) {
-      return res
-        .status(400)
-        .json({ error: "Expires date/time cannot be earlier than the publish date/time." });
-    }
-
-    // Whitelist fields to update
     const allowed = [
       "type",
       "title",
@@ -507,13 +463,51 @@ announcementRoutes.patch("/:id", authmiddleware, authorizedRole("admin"), async 
     const update = {};
     for (const k of allowed) if (k in req.body) update[k] = req.body[k];
 
+    // Load current doc so we can validate against existing dates
+    const current = await Announcement.findOne({ _id: id, isDeleted: false }).lean();
+    if (!current) return res.status(404).json({ error: "Not found" });
+
+    // What will the "published" state be after this patch?
+    const nextPublished = (typeof update.published === "boolean") ? update.published : !!current.published;
+
+    // Compute effective dates (incoming value wins, else current)
+    let effPublishAt =
+      update.publishAt != null ? new Date(update.publishAt) :
+      current.publishAt ? new Date(current.publishAt) : null;
+
+    let effExpiresAt =
+      update.expiresAt != null ? new Date(update.expiresAt) :
+      current.expiresAt ? new Date(current.expiresAt) : null;
+
+    const now = new Date();
+
+    // If we're publishing and there's no publishAt (or it's invalid), set it to "now"
+    if (nextPublished && (!effPublishAt || isNaN(effPublishAt.getTime()))) {
+      effPublishAt = now;
+      update.publishAt = effPublishAt;
+    }
+
+    // ---- VALIDATION ----
+    // 1) Expiry must be AFTER publishAt (if both exist)
+    if (effExpiresAt && effPublishAt && effExpiresAt <= effPublishAt) {
+      return res.status(400).json({ error: "Expiry date must be after the publish date." });
+    }
+
+    // 2) (Optional, but recommended) Expiry cannot be in the past
+    if (effExpiresAt && effExpiresAt <= now) {
+      return res.status(400).json({ error: "Expiry date cannot be in the past." });
+    }
+
+    // NOTE: We DO NOT block publishAt in the past anymore.
+    // This lets you publish a draft now (or back-date it). Scheduled posts still work
+    // because publishAt > now will show as "scheduled".
+
     const doc = await Announcement.findOneAndUpdate(
       { _id: id, isDeleted: false },
       update,
       { new: true, runValidators: true }
     );
 
-    if (!doc) return res.status(404).json({ error: "Not found" });
     res.json(doc);
   } catch (err) {
     res.status(400).json({ error: err.message });
