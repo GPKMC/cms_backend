@@ -32,15 +32,16 @@ taskRouter.get("/feed/:courseInstanceId", async (req, res) => {
 
     if (typeArr.includes("assignment")) {
       promises.push(
-        assignmentModel.find({
-          courseInstance: courseInstanceId,
-          ...topicFilter,
-        })
+        assignmentModel
+          .find({
+            courseInstance: courseInstanceId,
+            ...topicFilter,
+          })
           .populate("postedBy", "username role _id")
           .populate("topic", "title _id")
           .lean()
-          .then(items =>
-            items.map(a => ({
+          .then((items) =>
+            items.map((a) => ({
               ...a,
               type: "assignment",
             }))
@@ -50,16 +51,17 @@ taskRouter.get("/feed/:courseInstanceId", async (req, res) => {
 
     if (typeArr.includes("groupAssignment")) {
       promises.push(
-        groupAssignmentModel.find({
-          courseInstance: courseInstanceId,
-          ...topicFilter,
-        })
+        groupAssignmentModel
+          .find({
+            courseInstance: courseInstanceId,
+            ...topicFilter,
+          })
           .populate("postedBy", "username role _id")
           .populate("topic", "title _id")
-            .populate("groups.members", "username _id role") 
+          .populate("groups.members", "username _id role")
           .lean()
-          .then(items =>
-            items.map(a => ({
+          .then((items) =>
+            items.map((a) => ({
               ...a,
               type: "groupAssignment",
             }))
@@ -68,16 +70,21 @@ taskRouter.get("/feed/:courseInstanceId", async (req, res) => {
     }
 
     if (typeArr.includes("quiz")) {
+      // 🔒 Only include published quizzes
+      const publishedOnly = { $or: [{ published: true }, { isPublished: true }] };
+
       promises.push(
-        quizquestionModel.find({
-          courseInstance: courseInstanceId,
-          ...topicFilter,
-        })
+        quizquestionModel
+          .find({
+            courseInstance: courseInstanceId,
+            ...topicFilter, // keep if your quiz schema actually has "topic"
+            ...publishedOnly,
+          })
           .populate("postedBy", "username role _id")
-          .populate("topic", "title _id") // Only if "topic" exists in Quiz model!
+          .populate("topic", "title _id") // keep only if quiz has a topic ref
           .lean()
-          .then(items =>
-            items.map(a => ({
+          .then((items) =>
+            items.map((a) => ({
               ...a,
               type: "quiz",
             }))
@@ -87,15 +94,16 @@ taskRouter.get("/feed/:courseInstanceId", async (req, res) => {
 
     if (typeArr.includes("question")) {
       promises.push(
-        questionModel.find({
-          courseInstance: courseInstanceId,
-          ...topicFilter,
-        })
+        questionModel
+          .find({
+            courseInstance: courseInstanceId,
+            ...topicFilter,
+          })
           .populate("postedBy", "username role _id")
           .populate("topic", "title _id")
           .lean()
-          .then(items =>
-            items.map(a => ({
+          .then((items) =>
+            items.map((a) => ({
               ...a,
               type: "question",
             }))
@@ -114,7 +122,7 @@ taskRouter.get("/feed/:courseInstanceId", async (req, res) => {
     );
 
     // Normalize the output shape for frontend consumption
-    feed = feed.map(item => ({
+    feed = feed.map((item) => ({
       _id: item._id,
       type: item.type,
       title: item.title,
