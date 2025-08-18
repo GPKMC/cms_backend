@@ -55,7 +55,12 @@ courseSchema.post('save', async function(doc, next) {
     next(err);
   }
 });
-
+courseSchema.pre('remove', async function(next){
+  if (this.semesterOrYear) {
+    await mongoose.model('SemesterOrYear').findByIdAndUpdate(this.semesterOrYear, { $pull: { courses: this._id }});
+  }
+  next();
+});
 const Course = mongoose.model('Course', courseSchema);
 
 export default Course;

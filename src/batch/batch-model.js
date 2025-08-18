@@ -52,6 +52,7 @@ BatchSchema.pre('save', async function (next) {
     next(error);
   }
 });
+BatchSchema.index({ faculty: 1, startYear: 1 }, { unique: true });
 
 const Batch = mongoose.model('Batch', BatchSchema);
 export default Batch;

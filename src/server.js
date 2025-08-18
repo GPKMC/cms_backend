@@ -49,6 +49,10 @@ import assignmentGradeRouter from './assignment/assignmentGrade-router.js';
 import GroupGradeRouter from './assignment/groupGrade-router.js';
 import GradesRouter from './grade/overallGrade-routes.js';
 import teacherAssignmentRouter from './teacherRoutes/overallAssignment.js';
+import scheduleRouter from './functions/schedule/schedule-event-routes.js';
+import teacherAvailabilityRouter from './functions/schedule/teacher-availability-routes.js';
+import scheduleEventRouter from './functions/schedule/schedule-solver-routes.js';
+import announcementRoutes from './functions/announcement-routes.js';
 
 // ====== Connect DB ======
 await connectDB(); // if connectDB() isn't async, remove await
@@ -145,6 +149,10 @@ app.use("/assignmentgrading", assignmentGradeRouter);
 app.use("/groupassignmentgrading", GroupGradeRouter);
 app.use("/grade", GradesRouter);
 app.use("/overallAssignment", teacherAssignmentRouter);
+app.use("/schedule", scheduleRouter);
+app.use("/schedule", teacherAvailabilityRouter);
+app.use("/schedule", scheduleEventRouter);
+app.use("/announcement", announcementRoutes);
 
 
 // ⚠️ Attendance router mounted at /attendance.
