@@ -53,6 +53,7 @@ import scheduleRouter from './functions/schedule/schedule-event-routes.js';
 import teacherAvailabilityRouter from './functions/schedule/teacher-availability-routes.js';
 import scheduleEventRouter from './functions/schedule/schedule-solver-routes.js';
 import announcementRoutes from './functions/announcement-routes.js';
+import replyRoutes from './functions/announcement-reply-routes.js';
 
 // ====== Connect DB ======
 await connectDB(); // if connectDB() isn't async, remove await
@@ -153,6 +154,7 @@ app.use("/schedule", scheduleRouter);
 app.use("/schedule", teacherAvailabilityRouter);
 app.use("/schedule", scheduleEventRouter);
 app.use("/announcement", announcementRoutes);
+app.use("/reply", replyRoutes);
 
 
 // ⚠️ Attendance router mounted at /attendance.

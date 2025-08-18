@@ -131,19 +131,46 @@ async function unlinkIfExists(p) {
   try { await fs.promises.unlink(p); } catch { /* ignore */ }
 }
 
-/* ========= ROUTES (ORDER MATTERS!) ========= */
-// In your main server entry, be sure to expose uploads:
-// app.use("/uploads", express.static(path.join(process.cwd(), "uploads")));
+function toDateOrNull(v) {
+  if (v === null || v === undefined || v === '') return null;
+  const d = new Date(v);
+  return isNaN(d.getTime()) ? null : d;
+}
+
+function validateDates(publishAtRaw, expiresAtRaw, { checkPublishPast = true, checkExpiresPast = true } = {}) {
+  const publishAt = toDateOrNull(publishAtRaw);
+  const expiresAt = toDateOrNull(expiresAtRaw);
+  const nowTs = Date.now();
+
+  if (checkPublishPast && publishAt && publishAt.getTime() < nowTs) {
+    return 'Publish date/time cannot be in the past.';
+  }
+  if (checkExpiresPast && expiresAt && expiresAt.getTime() < nowTs) {
+    return 'Expires date/time cannot be in the past.';
+  }
+  if (publishAt && expiresAt && expiresAt.getTime() < publishAt.getTime()) {
+    return 'Expires date/time cannot be earlier than the publish date/time.';
+  }
+  return null; // OK
+}
 
 /* ---- Create ---- */
 announcementRoutes.post("/", authmiddleware, authorizedRole("admin"), async (req, res) => {
   try {
+    // Enforce: publishAt not in past, expiresAt not in past, expiresAt >= publishAt
+    const errMsg = validateDates(req.body.publishAt, req.body.expiresAt, {
+      checkPublishPast: true,
+      checkExpiresPast: true,
+    });
+    if (errMsg) return res.status(400).json({ error: errMsg });
+
     const doc = await Announcement.create({ ...req.body, postedBy: req.user?._id });
     res.status(201).json(doc);
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
 });
+
 
 /* ---- Upload ---- */
 announcementRoutes.post(
@@ -270,9 +297,14 @@ announcementRoutes.get("/folder-counts", authmiddleware, authorizedRole("admin",
           archived: { $sum: { $cond: [{ $eq: ["$_archived", true] }, 1, 0] } },
           inbox: {
             $sum: {
-              $cond: [{ $and: [{ $in: ["$_status", ["live", "scheduled"]] }, { $eq: ["$_archived", false] }] }, 1, 0],
+              $cond: [
+                { $and: [{ $eq: ["$_status", "live"] }, { $eq: ["$_archived", false] }] },
+                1,
+                0
+              ],
             },
           },
+
         },
       },
       { $project: { _id: 0, all: "$total", drafts: 1, scheduled: 1, expired: 1, live: 1, archived: 1, inbox: 1 } },
@@ -413,6 +445,50 @@ announcementRoutes.patch("/:id", authmiddleware, authorizedRole("admin"), async 
     const { id } = req.params;
     if (!isId(id)) return res.status(400).json({ error: "Invalid id" });
 
+    // Load current doc to compute effective dates
+    const current = await Announcement.findOne({ _id: id, isDeleted: false }).lean();
+    if (!current) return res.status(404).json({ error: "Not found" });
+
+    // Normalize incoming date fields
+    const hasPublishAt = Object.prototype.hasOwnProperty.call(req.body, "publishAt");
+    const hasExpiresAt = Object.prototype.hasOwnProperty.call(req.body, "expiresAt");
+    const normalize = (v) => (v === "" ? null : v);
+
+    if (hasPublishAt) req.body.publishAt = normalize(req.body.publishAt);
+    if (hasExpiresAt) req.body.expiresAt = normalize(req.body.expiresAt);
+
+    // Effective values (mix of existing + incoming)
+    const nextPublishAtRaw = hasPublishAt ? req.body.publishAt : current.publishAt;
+    const nextExpiresAtRaw = hasExpiresAt ? req.body.expiresAt : current.expiresAt;
+
+    const toDate = (v) => (v == null ? null : new Date(v));
+    const pubDate = toDate(nextPublishAtRaw);
+    const expDate = toDate(nextExpiresAtRaw);
+
+    // Basic date validity checks (only if provided)
+    if (hasPublishAt && pubDate && isNaN(pubDate.getTime())) {
+      return res.status(400).json({ error: "Invalid publishAt date/time." });
+    }
+    if (hasExpiresAt && expDate && isNaN(expDate.getTime())) {
+      return res.status(400).json({ error: "Invalid expiresAt date/time." });
+    }
+
+    const nowTs = Date.now();
+
+    // Business rules
+    if (hasPublishAt && pubDate && pubDate.getTime() < nowTs) {
+      return res.status(400).json({ error: "Publish date/time cannot be in the past." });
+    }
+    if (hasExpiresAt && expDate && expDate.getTime() < nowTs) {
+      return res.status(400).json({ error: "Expires date/time cannot be in the past." });
+    }
+    if (pubDate && expDate && expDate.getTime() < pubDate.getTime()) {
+      return res
+        .status(400)
+        .json({ error: "Expires date/time cannot be earlier than the publish date/time." });
+    }
+
+    // Whitelist fields to update
     const allowed = [
       "type",
       "title",
@@ -431,16 +507,19 @@ announcementRoutes.patch("/:id", authmiddleware, authorizedRole("admin"), async 
     const update = {};
     for (const k of allowed) if (k in req.body) update[k] = req.body[k];
 
-    const doc = await Announcement.findOneAndUpdate({ _id: id, isDeleted: false }, update, {
-      new: true,
-      runValidators: true,
-    });
+    const doc = await Announcement.findOneAndUpdate(
+      { _id: id, isDeleted: false },
+      update,
+      { new: true, runValidators: true }
+    );
+
     if (!doc) return res.status(404).json({ error: "Not found" });
     res.json(doc);
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
 });
+
 
 // HARD delete (remove doc, states, & any uploaded files)
 announcementRoutes.delete("/:id", authmiddleware, authorizedRole("admin"), async (req, res) => {
