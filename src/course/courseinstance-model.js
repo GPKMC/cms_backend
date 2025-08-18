@@ -58,6 +58,31 @@ const courseInstanceSchema = new mongoose.Schema({
 
 // Enforce unique batch+course+teacher if needed (or just batch+course)
 courseInstanceSchema.index({ batch: 1, course: 1 }, { unique: true });
+courseInstanceSchema.pre('validate', async function(next){
+  try {
+    const User = mongoose.model('User');
+    const Course = mongoose.model('Course');
+    const SemesterOrYear = mongoose.model('SemesterOrYear');
+    const Faculty = mongoose.model('Faculty');
+    const Batch = mongoose.model('Batch');
 
+    // teacher must be a teacher
+    const t = await User.findById(this.teacher).select('role').lean();
+    if (!t || t.role !== 'teacher') return next(new Error('Assigned teacher must have role="teacher"'));
+
+    // batch & course must be of same faculty
+    const [course, batch] = await Promise.all([
+      Course.findById(this.course).populate({ path: 'semesterOrYear', select:'faculty' }).lean(),
+      Batch.findById(this.batch).select('faculty').lean()
+    ]);
+    if (!course || !batch) return next(new Error('Invalid batch or course'));
+    const facFromCourse = course?.semesterOrYear?.faculty?.toString();
+    const facFromBatch = batch?.faculty?.toString();
+    if (!facFromCourse || !facFromBatch || facFromCourse !== facFromBatch) {
+      return next(new Error('Batch and Course must belong to the same Faculty'));
+    }
+    next();
+  } catch (e) { next(e); }
+});
 const CourseInstance = mongoose.model('CourseInstance', courseInstanceSchema);
 export default CourseInstance;

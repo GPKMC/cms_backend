@@ -245,4 +245,150 @@ CourseInstancerouter.get("/course-instance/:id/students", async (req, res) => {
   }).select("username email _id");
   res.json(students);
 });
+
+// GET all (with filters + shape for frontend schedule UI)
+CourseInstancerouter.get(
+  "/overallCourseInstance",
+  authmiddleware,
+  authorizedRole("admin", "teacher", "student"),
+  async (req, res) => {
+    const started = Date.now();
+    const dbg = ["1","true","yes","y","on"].includes(String(req.query.debug || "").toLowerCase());
+
+    try {
+      const {
+        faculty,           // optional
+        semesterOrYear,    // optional
+        batch,             // optional
+        course,            // optional
+        teacher,           // optional
+        active,            // optional truthy -> isActive=true/false
+        limit = "1000",
+      } = req.query;
+
+      const max = Math.min(parseInt(limit, 10) || 1000, 2000);
+
+      // ---- Build Mongo filter (only direct refs here) ----
+      const q = {};
+      if (batch)   q.batch = batch;
+      if (course)  q.course = course;
+      if (teacher) q.teacher = teacher;
+
+      const userRole = req.user?.role;
+      if (dbg) {
+        console.log("[CIv2] user:", { id: String(req.user?._id || ""), role: userRole });
+        console.log("[CIv2] raw query params:", req.query);
+      }
+
+      // Role scoping
+      if (userRole === "teacher" && !q.teacher) {
+        q.teacher = req.user._id;
+      }
+      if (userRole === "student" && !q.batch) {
+        if (!req.user?.batch) {
+          if (dbg) console.warn("[CIv2] student has no batch");
+          return res.status(400).json({ ok: false, error: "Student has no batch assigned" });
+        }
+        q.batch = req.user.batch;
+      }
+
+      // Optional active flag
+      if (typeof active !== "undefined") {
+        const s = String(active).toLowerCase();
+        if (["1","true","yes","y","on"].includes(s))  q.isActive = true;
+        if (["0","false","no","n","off"].includes(s)) q.isActive = false;
+      }
+
+      if (dbg) console.log("[CIv2] mongo filter:", q);
+
+      // ---- Fetch + populate (filter by faculty/semester after populate) ----
+      let list = await CourseInstance.find(q)
+        .populate({
+          path: "course",
+          select: "name code semesterOrYear",
+          populate: { path: "semesterOrYear", select: "name faculty" },
+        })
+        .populate({ path: "batch", select: "batchname faculty" })
+        .populate({ path: "teacher", select: "name username email role" })
+        // .sort({ "course.name": 1 }) // <-- don't sort by populated path in DB
+        .limit(max)
+        .lean();
+
+      // sort by course name in JS after populate
+      list.sort((a, b) => (a?.course?.name || "").localeCompare(b?.course?.name || ""));
+
+      if (dbg) console.log("[CIv2] fetched count:", list.length);
+
+      // ---- In-memory filters that depend on populated docs ----
+      const filtered = list.filter((ci) => {
+        const sy = ci?.course?.semesterOrYear;        // ObjectId or populated doc
+        const facFromSY = sy?.faculty;                // ObjectId or populated doc
+        const facFromBatch = ci?.batch?.faculty;      // ObjectId or populated doc
+
+        if (semesterOrYear && String(sy?._id || sy) !== String(semesterOrYear)) return false;
+
+        if (faculty) {
+          const facId =
+            (facFromSY && String(facFromSY._id || facFromSY)) ||
+            (facFromBatch && String(facFromBatch._id || facFromBatch));
+          if (String(faculty) !== String(facId)) return false;
+        }
+        return true;
+      });
+
+      if (dbg) {
+        console.log("[CIv2] filtered count:", filtered.length);
+        // log a tiny sample so console isn't spammed
+        console.log("[CIv2] sample item:", JSON.stringify(filtered[0] || {}, null, 2));
+      }
+
+      // ---- Shape for frontend ----
+      const items = filtered.map((ci) => ({
+        _id: ci._id,
+        course: {
+          _id: ci.course?._id,
+          name: ci.course?.name || "—",
+          code: ci.course?.code,
+          semesterOrYear: ci.course?.semesterOrYear?._id || ci.course?.semesterOrYear || undefined,
+        },
+        teacher: {
+          _id: ci.teacher?._id,
+          name: ci.teacher?.name || ci.teacher?.username || "—",
+          email: ci.teacher?.email,
+        },
+        batch: {
+          _id: ci.batch?._id,
+          batchname: ci.batch?.batchname || "—",
+        },
+        isActive: ci.isActive,
+      }));
+
+      const tookMs = Date.now() - started;
+
+      // When debug=1, include some extra diagnostics in the response (dev only)
+      if (dbg && process.env.NODE_ENV !== "production") {
+        return res.json({
+          ok: true,
+          count: items.length,
+          tookMs,
+          filter: q,
+          params: req.query,
+          items,
+        });
+      }
+
+      res.json({ ok: true, count: items.length, items });
+    } catch (err) {
+      console.error("[CIv2] ERROR:", err && err.stack ? err.stack : err);
+      // keep the client error terse unless in debug & non-prod
+      if (["1","true","yes","y","on"].includes(String(req.query.debug || "").toLowerCase()) &&
+          process.env.NODE_ENV !== "production") {
+        return res.status(500).json({ ok: false, error: err.message, stack: err.stack });
+      }
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  }
+);
+
+
 export default CourseInstancerouter;

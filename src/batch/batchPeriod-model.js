@@ -35,6 +35,10 @@ batchPeriodSchema.pre('save', function (next) {
   }
   next();
 });
-
+// Ensure only one ongoing per pair
+batchPeriodSchema.index(
+  { batch: 1, semesterOrYear: 1, status: 1 },
+  { unique: true, partialFilterExpression: { status: "ongoing" } }
+);
 const BatchPeriod = mongoose.model("BatchPeriod", batchPeriodSchema);
 export default BatchPeriod;
