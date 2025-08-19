@@ -101,4 +101,27 @@ teacherRouter.get(
   }
 );
 
+teacherRouter.get(
+  "/course-instance/:id/students",
+  authmiddleware,
+  authorizedRole("teacher"),
+  async (req, res) => {
+    const { id } = req.params;
+    const ci = await CourseInstance.findById(id).select("teacher batch").lean();
+    if (!ci) return res.status(404).json({ error: "CourseInstance not found" });
+    if (String(ci.teacher) !== String(req.user._id)) {
+      return res.status(403).json({ error: "Forbidden" });
+    }
+
+    // If you track enrollment by batch:
+    const students = await User.find({ role: "student", batch: ci.batch })
+      .select("_id name username email")
+      .lean();
+
+    res.json(students);
+  }
+);
+
+
+
 export default teacherRouter;
