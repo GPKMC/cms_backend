@@ -7,6 +7,7 @@ import multer from "multer";
 import Announcement, { ANNOUNCEMENT_TYPES } from "./announcement-model.js";
 import { authmiddleware, authorizedRole } from "../users/user-middleware.js";
 import AnnouncementState from "./announcement-state-model.js";
+import AnnouncementReply from "./announcement-reply-model.js";
 
 const announcementRoutes = express.Router();
 
@@ -219,20 +220,76 @@ announcementRoutes.get("/", authmiddleware, authorizedRole("admin", "teacher", "
       Announcement.countDocuments(cond),
     ]);
 
+    const userId = req.user._id;
     const ids = items.map((i) => i._id);
-    const states = await AnnouncementState.find({ user: req.user._id, announcement: { $in: ids } })
+
+    // states
+    const states = await AnnouncementState.find({ user: userId, announcement: { $in: ids } })
       .select("announcement readAt archived archivedAt")
       .lean();
-    const map = new Map(states.map((s) => [String(s.announcement), s]));
+    const stateMap = new Map(states.map((s) => [String(s.announcement), s]));
+
+    // ---- REPLY COUNTS (all depths) ----
+    // total replies across root + children
+    const totalAgg = await AnnouncementReply.aggregate([
+      { $match: { announcement: { $in: ids }, isDeleted: { $ne: true } } },
+      { $group: { _id: "$announcement", count: { $sum: 1 } } },
+    ]);
+    const totalMap = new Map(totalAgg.map((r) => [String(r._id), r.count]));
+
+    // new replies since user's readAt (optionally exclude user’s own)
+    const newAgg = await AnnouncementReply.aggregate([
+      { $match: { announcement: { $in: ids }, isDeleted: { $ne: true } } },
+      {
+        $lookup: {
+          from: "announcementstates",
+          let: { annId: "$announcement" },
+          pipeline: [
+            {
+              $match: {
+                $expr: {
+                  $and: [
+                    { $eq: ["$announcement", "$$annId"] },
+                    { $eq: ["$user", userId] },
+                  ],
+                },
+              },
+            },
+            { $project: { _id: 0, readAt: 1 } },
+          ],
+          as: "_state",
+        },
+      },
+      { $addFields: { _readAt: { $ifNull: [{ $first: "$_state.readAt" }, null] } } },
+      {
+        $match: {
+          $expr: {
+            $or: [
+              { $eq: ["$_readAt", null] },
+              { $gt: ["$createdAt", "$_readAt"] },
+            ],
+          },
+        },
+      },
+      // If you don't want to count the current user's own replies as "new", uncomment:
+      // { $match: { author: { $ne: userId } } },
+      { $group: { _id: "$announcement", count: { $sum: 1 } } },
+    ]);
+    const newMap = new Map(newAgg.map((r) => [String(r._id), r.count]));
 
     res.json({
       page,
       limit,
       total,
-      data: items.map((i) => ({
-        ...i,
-        myState: map.get(String(i._id)) || { readAt: null, archived: false, archivedAt: null },
-      })),
+      data: items.map((i) => {
+        const key = String(i._id);
+        return {
+          ...i,
+          myState: stateMap.get(key) || { readAt: null, archived: false, archivedAt: null },
+          replyCount: totalMap.get(key) || 0,   // <-- total replies
+          newReplyCount: newMap.get(key) || 0,  // <-- new since readAt
+        };
+      }),
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -416,6 +473,72 @@ announcementRoutes.get(
   }
 );
 
+/* ---- Small dedicated reply counts endpoint ---- */
+announcementRoutes.get("/:id/reply-counts", authmiddleware, authorizedRole("admin", "teacher", "student"), async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!isId(id)) return res.status(400).json({ error: "Invalid id" });
+
+    const doc = await Announcement.findOne({
+      _id: id,
+      ...visibility({ adminIncludeUnpublished: req.user.role === "admin" }),
+      ...audienceFilter(req.user),
+    }).select("_id").lean();
+    if (!doc) return res.status(404).json({ error: "Not found" });
+
+    const userId = req.user._id;
+
+    const [totalRow] = await AnnouncementReply.aggregate([
+      { $match: { announcement: doc._id, isDeleted: { $ne: true } } },
+      { $group: { _id: "$announcement", count: { $sum: 1 } } },
+    ]);
+
+    const [newRow] = await AnnouncementReply.aggregate([
+      { $match: { announcement: doc._id, isDeleted: { $ne: true } } },
+      {
+        $lookup: {
+          from: "announcementstates",
+          let: { annId: "$announcement" },
+          pipeline: [
+            {
+              $match: {
+                $expr: {
+                  $and: [
+                    { $eq: ["$announcement", "$$annId"] },
+                    { $eq: ["$user", userId] },
+                  ],
+                },
+              },
+            },
+            { $project: { _id: 0, readAt: 1 } },
+          ],
+          as: "_state",
+        },
+      },
+      { $addFields: { _readAt: { $ifNull: [{ $first: "$_state.readAt" }, null] } } },
+      {
+        $match: {
+          $expr: {
+            $or: [
+              { $eq: ["$_readAt", null] },
+              { $gt: ["$createdAt", "$_readAt"] },
+            ],
+          },
+        },
+      },
+      // { $match: { author: { $ne: userId } } }, // optional
+      { $group: { _id: "$announcement", count: { $sum: 1 } } },
+    ]);
+
+    res.json({
+      replyCount: totalRow?.count || 0,
+      newReplyCount: newRow?.count || 0,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 /* ---- CRUD + state ---- */
 // Read single
 announcementRoutes.get("/:id", authmiddleware, authorizedRole("admin", "teacher", "student"), async (req, res) => {
@@ -493,14 +616,12 @@ announcementRoutes.patch("/:id", authmiddleware, authorizedRole("admin"), async 
       return res.status(400).json({ error: "Expiry date must be after the publish date." });
     }
 
-    // 2) (Optional, but recommended) Expiry cannot be in the past
+    // 2) (Optional) Expiry cannot be in the past
     if (effExpiresAt && effExpiresAt <= now) {
       return res.status(400).json({ error: "Expiry date cannot be in the past." });
     }
 
     // NOTE: We DO NOT block publishAt in the past anymore.
-    // This lets you publish a draft now (or back-date it). Scheduled posts still work
-    // because publishAt > now will show as "scheduled".
 
     const doc = await Announcement.findOneAndUpdate(
       { _id: id, isDeleted: false },
