@@ -166,62 +166,68 @@ userRouter.post(
           return res.status(400).json({ message: "CSV file is empty or invalid." });
         }
 
-        for (const row of usersFromCSV) {
-          let { username, email, password, role, batch } = row;
+        for (let i = 0; i < usersFromCSV.length; i++) {
+          let { username, email, password, role, batch } = usersFromCSV[i];
 
           if (!username || !email || !password || !role) {
             return res.status(400).json({
+              rowIndex: i,
+              field: "general",
               message: "Each row must have username, email, password, and role.",
             });
           }
 
           if (!rolePermission[creatorRole]?.includes(role)) {
             return res.status(403).json({
+              rowIndex: i,
+              field: "role",
               message: `Role '${creatorRole}' cannot create role '${role}'.`,
             });
           }
 
           if (!validateEmail(email, role, username)) {
             return res.status(400).json({
+              rowIndex: i,
               field: "email",
-              message: `Email format invalid for role '${role}'. Expected ${
-                role === "student" ? "username.number" : "username"
-              }@gpkmc.edu.np`,
+              message: `Email format invalid for role '${role}'.`,
             });
           }
 
           if (!validatePassword(password)) {
             return res.status(400).json({
+              rowIndex: i,
               field: "password",
               message: "Password does not meet criteria.",
             });
           }
 
           if (role === "student") {
-            // If batch is not a valid ObjectId, treat as batchname and find _id
             if (!mongoose.Types.ObjectId.isValid(batch)) {
               const batchDoc = await Batch.findOne({ batchname: batch });
               if (!batchDoc) {
                 return res.status(400).json({
+                  rowIndex: i,
                   field: "batch",
                   message: `Batch '${batch}' not found.`,
                 });
               }
               batch = batchDoc._id.toString();
             } else {
-              // Validate batch ID exists
               const batchValidation = await validateBatchForStudent(batch);
               if (!batchValidation.valid) {
-                return res.status(400).json({ field: "batch", message: batchValidation.message });
+                return res.status(400).json({
+                  rowIndex: i,
+                  field: "batch",
+                  message: batchValidation.message,
+                });
               }
             }
-          } else {
-            if (batch) {
-              return res.status(400).json({
-                field: "batch",
-                message: "Batch can only be assigned to students.",
-              });
-            }
+          } else if (batch) {
+            return res.status(400).json({
+              rowIndex: i,
+              field: "batch",
+              message: "Batch can only be assigned to students.",
+            });
           }
 
           usersToInsert.push({
@@ -236,34 +242,39 @@ userRouter.post(
           });
         }
       }
+
       // JSON array case
       else if (Array.isArray(req.body.users)) {
-        for (const user of req.body.users) {
-          let { username, email, password, role, batch } = user;
+        for (let i = 0; i < req.body.users.length; i++) {
+          let { username, email, password, role, batch } = req.body.users[i];
 
           if (!username || !email || !password || !role) {
             return res.status(400).json({
+              rowIndex: i,
+              field: "general",
               message: "Each user must have username, email, password, and role.",
             });
           }
 
           if (!rolePermission[creatorRole]?.includes(role)) {
             return res.status(403).json({
+              rowIndex: i,
+              field: "role",
               message: `Role '${creatorRole}' cannot create role '${role}'.`,
             });
           }
 
           if (!validateEmail(email, role, username)) {
             return res.status(400).json({
+              rowIndex: i,
               field: "email",
-              message: `Email format invalid for role '${role}'. Expected ${
-                role === "student" ? "username.number" : "username"
-              }@gpkmc.edu.np`,
+              message: `Email format invalid for role '${role}'.`,
             });
           }
 
           if (!validatePassword(password)) {
             return res.status(400).json({
+              rowIndex: i,
               field: "password",
               message: "Password does not meet criteria.",
             });
@@ -274,6 +285,7 @@ userRouter.post(
               const batchDoc = await Batch.findOne({ batchname: batch });
               if (!batchDoc) {
                 return res.status(400).json({
+                  rowIndex: i,
                   field: "batch",
                   message: `Batch '${batch}' not found.`,
                 });
@@ -282,16 +294,19 @@ userRouter.post(
             } else {
               const batchValidation = await validateBatchForStudent(batch);
               if (!batchValidation.valid) {
-                return res.status(400).json({ field: "batch", message: batchValidation.message });
+                return res.status(400).json({
+                  rowIndex: i,
+                  field: "batch",
+                  message: batchValidation.message,
+                });
               }
             }
-          } else {
-            if (batch) {
-              return res.status(400).json({
-                field: "batch",
-                message: "Batch can only be assigned to students.",
-              });
-            }
+          } else if (batch) {
+            return res.status(400).json({
+              rowIndex: i,
+              field: "batch",
+              message: "Batch can only be assigned to students.",
+            });
           }
 
           usersToInsert.push({
@@ -311,17 +326,21 @@ userRouter.post(
         });
       }
 
-      // Check for duplicates by email before inserting
+      // Check for duplicate emails before inserting
       const emails = usersToInsert.map((u) => u.email);
       const existing = await User.find({ email: { $in: emails } });
       if (existing.length > 0) {
+        const firstConflictIndex = usersToInsert.findIndex((u) =>
+          existing.some((e) => e.email === u.email)
+        );
         return res.status(400).json({
-          message: `Users with these emails already exist: ${existing
-            .map((u) => u.email)
-            .join(", ")}`,
+          rowIndex: firstConflictIndex,
+          field: "email",
+          message: `User with email '${usersToInsert[firstConflictIndex].email}' already exists.`,
         });
       }
 
+      // Insert all valid users
       const inserted = await User.insertMany(usersToInsert);
 
       res.status(201).json({
@@ -342,6 +361,7 @@ userRouter.post(
     }
   }
 );
+
 
 
 
@@ -435,13 +455,15 @@ userRouter.delete("/users/:id", authmiddleware,authorizedRole("admin"),  async (
 });
 
 // GET user by ID
-userRouter.get("/users/:id", authmiddleware, authorizedRole("admin",), async (req, res) => {
+userRouter.get("/users/:id", authmiddleware, authorizedRole("admin"), async (req, res) => {
   try {
     if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
       return res.status(400).json({ error: "Invalid user ID" });
     }
 
-    const user = await User.findById(req.params.id).select("-password");
+    const user = await User.findById(req.params.id)
+      .select("-password")
+      .populate("batch", "batchname year faculty"); // <-- populate here
 
     if (!user) {
       return res.status(404).json({ error: "User not found" });
@@ -453,6 +475,7 @@ userRouter.get("/users/:id", authmiddleware, authorizedRole("admin",), async (re
     res.status(500).json({ message: "Server error" });
   }
 });
+
 
 // GET users with filters
 userRouter.get("/users", authmiddleware, authorizedRole("admin"), async (req, res) => {
