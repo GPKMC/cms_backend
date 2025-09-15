@@ -158,7 +158,7 @@ app.use("/schedule", scheduleEventRouter);
 app.use("/announcement", announcementRoutes);
 app.use("/reply", replyRoutes);
 app.use("/result", ResultRouter);
-app.use("/calendar", Calender);
+app.use("/calendacourseinstancesr", Calender);
 
 
 // ⚠️ Attendance router mounted at /attendance.

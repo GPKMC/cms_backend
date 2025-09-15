@@ -1,11 +1,9 @@
 // src/middleware/upload.js
-import multer from 'multer';
-import path from 'path';
-import fs from 'fs';
+import multer from "multer";
+import path from "path";
+import fs from "fs";
 
-const uploadFolder = path.join(process.cwd(), 'uploads', 'userlist');
-
-// Ensure folder exists
+const uploadFolder = path.join(process.cwd(), "uploads", "userlist");
 fs.mkdirSync(uploadFolder, { recursive: true });
 
 const storage = multer.diskStorage({
@@ -13,17 +11,18 @@ const storage = multer.diskStorage({
     cb(null, uploadFolder);
   },
   filename: function (req, file, cb) {
-    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
+    const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
     const ext = path.extname(file.originalname);
-    cb(null, file.fieldname + '-' + uniqueSuffix + ext);
+    cb(null, file.fieldname + "-" + uniqueSuffix + ext);
   },
 });
 
 const fileFilter = (req, file, cb) => {
-  if (file.mimetype === 'text/csv') {
+  // Accept both plain CSV and Excel's CSV mimetype
+  if (file.mimetype === "text/csv" || file.mimetype === "application/vnd.ms-excel") {
     cb(null, true);
   } else {
-    cb(new Error('Only CSV files are allowed'), false);
+    cb(new Error("Only CSV files are allowed"), false);
   }
 };
 
