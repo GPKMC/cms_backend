@@ -6,11 +6,13 @@ import path from 'path';
 import { createServer } from 'node:http';
 import { Server as SocketIOServer } from 'socket.io';
 import mongoose from 'mongoose';
+import session from 'express-session';
+import passport from 'passport';
 
 // --- DB ---
 import connectDB from './db.js';
 
-// --- Routers (your existing ones) ---
+// --- Routers ---
 import userRouter from './users/user-routes.js';
 import authRouter from './users/user-auth.js';
 import googleAuthRouter from './users/googleAuth.js';
@@ -35,7 +37,6 @@ import materialCommentRouter from './comment/materialComment-routes.js';
 import taskRouter from './student-routes/task-feed.js';
 import assignmentCommentRouter from './comment/assignmentComment-routes.js';
 import Refroutes from './plagiarism/refPost-routes.js';
-// import Submissionrouter from './plagiarism/submission-routes.js';
 import questionCommentRouter from './comment/QuestionComment.js';
 import assignmentSubmissionrouter from './assignment/assignmentSubmission-routes.js';
 import QuizSubmissionrouter from './quizQuestion/submission-router.js';
@@ -58,7 +59,7 @@ import ResultRouter from './result/result-routes.js';
 import Calender from './calender.js';
 
 // ====== Connect DB ======
-await connectDB(); // if connectDB() isn't async, remove await
+await connectDB();
 
 // ====== App ======
 const app = express();
@@ -67,9 +68,26 @@ const ORIGINS =
   (process.env.CORS_ORIGIN?.split(',').map(s => s.trim()).filter(Boolean)) ||
   ['http://localhost:3000'];
 
+app.set('trust proxy', 1); // required if behind proxy (Heroku/Render/Nginx)
+
+// CORS & parsers
 app.use(cors({ origin: ORIGINS, credentials: true }));
 app.use(express.json({ limit: '20mb' }));
 app.use(express.urlencoded({ limit: '20mb', extended: true }));
+
+// Short-lived session for OAuth state/PKCE (we don't use server sessions for auth)
+app.use(session({
+  secret: process.env.SESSION_SECRET || 'dev-session',
+  resave: false,
+  saveUninitialized: false,
+  cookie: {
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'lax'
+  }
+}));
+
+// Initialize Passport
+app.use(passport.initialize());
 
 // Static files
 app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
@@ -118,7 +136,8 @@ app.use((req, _res, next) => {
 // ====== Mount routes ======
 app.use('/user-api', userRouter);
 app.use('/userAuth', authRouter);
-app.use('/api/auth', googleAuthRouter);
+app.use('/api/auth', googleAuthRouter); // callbackURL aligned to this base
+
 app.use('/faculty-api', facultyRouter);
 app.use('/batch-api', batchRouter);
 app.use('/batch-api', routBatchPeriodRouter);
@@ -135,8 +154,8 @@ app.use('/Coursefeeds', FeedRouter);
 app.use('/group-assignment', GroupAssignmentRouter);
 app.use('/quizrouter', QuizRouter);
 app.use('/student', StudentRoutes);
-app.use('/student', StudentFeedRouter); // materials feed
-app.use('/student', taskRouter);        // tasks feed
+app.use('/student', StudentFeedRouter);
+app.use('/student', taskRouter);
 app.use('/comment', materialCommentRouter);
 app.use('/comment', assignmentCommentRouter);
 app.use('/comment', questionCommentRouter);
@@ -160,9 +179,7 @@ app.use("/reply", replyRoutes);
 app.use("/result", ResultRouter);
 app.use("/calendacourseinstancesr", Calender);
 
-
-// ⚠️ Attendance router mounted at /attendance.
-// Ensure the router's internal paths are like "/sessions", NOT "/attendance/sessions".
+// Attendance router
 app.use('/attendance', AttendanceRouter);
 
 // Health check

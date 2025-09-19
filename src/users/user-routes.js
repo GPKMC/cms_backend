@@ -3,8 +3,8 @@ import express from "express";
 import bcrypt from "bcryptjs";
 import mongoose from "mongoose";
 import User from "./user-model.js";
-import Batch from "../batch/batch-model.js"; // adjust if needed
-import Faculty from "../faculty/faculty-model.js"; // <-- NEW: adjust path to your Faculty model
+import Batch from "../batch/batch-model.js";
+import Faculty from "../faculty/faculty-model.js";
 import { authmiddleware, authorizedRole } from "./user-middleware.js";
 import { upload } from "../middleware/upload.js";
 import { parseCSV } from "../utlis/parseCsv.js";
@@ -19,36 +19,55 @@ function getFirstName(username = "") {
   const parts = String(username).trim().split(/\s+/);
   return parts[0]?.toLowerCase() || "";
 }
+
+/**
+ * Accepts:
+ *  - For students:  <first>.<digits>  |  <allnamesjoined>.<digits>  |  <all.names.dotted>.<digits>
+ *  - For staff (teacher/admin/superadmin): <first> | <allnamesjoined> | <all.names.dotted>
+ * Domain must be @gpkmc.edu.np
+ */
 function validateEmail(email, role, username) {
   const domain = "@gpkmc.edu.np";
   if (typeof email !== "string" || !email) return false;
-  const lower = email.toLowerCase().trim();
-  if (!lower.endsWith(domain)) return false;
 
-  const fullNameNormalized = normalizeName(username);
-  const firstName = getFirstName(username);
+  const lower = email.trim().toLowerCase();
+  const domainLower = domain.toLowerCase();
+  if (!lower.endsWith(domainLower)) return false;
+
+  const parts = String(username || "")
+    .trim().toLowerCase().split(/\s+/).filter(Boolean)
+    .map(p => p.replace(/[^a-z0-9]/g, ""));
+
+  const first = parts[0] || "";
+  const fullNoSep  = parts.join("");
+  const fullDotSep = parts.join(".");
+  const firstLastDot = parts.length >= 2 ? `${parts[0]}.${parts[parts.length - 1]}` : fullDotSep;
+
+  const escapedDomain = domainLower.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const alts = Array.from(new Set([first, fullNoSep, fullDotSep, firstLastDot].filter(Boolean)));
 
   if (role === "student") {
-    const regexFullName = new RegExp(`^${fullNameNormalized}\\.\\d+${domain}$`);
-    const regexFirstName = new RegExp(`^${firstName}\\.\\d+${domain}$`);
-    return regexFullName.test(lower) || regexFirstName.test(lower);
+    const re = new RegExp(`^(${alts.map(s => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")})\\.\\d+${escapedDomain}$`);
+    return re.test(lower);
   } else {
-    const regexFullName = new RegExp(`^${fullNameNormalized}${domain}$`);
-    const regexFirstName = new RegExp(`^${firstName}${domain}$`);
-    return regexFullName.test(lower) || regexFirstName.test(lower);
+    const re = new RegExp(`^(${alts.map(s => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")})${escapedDomain}$`);
+    return re.test(lower);
   }
 }
+
 function validatePassword(password) {
   // Start Uppercase, at least one digit, at least one special, length >= 7
   const passwordRegex = /^[A-Z](?=.*\d)(?=.*[@#$%^&+=!*]).{6,}$/;
   return passwordRegex.test(password || "");
 }
+
 const rolePermission = {
   superadmin: ["superadmin", "admin", "student", "teacher"],
   admin: ["teacher", "student", "admin"],
   teacher: [],
   student: [],
 };
+
 async function validateBatchForStudent(batchId) {
   if (!batchId) return { valid: false, message: "Batch is required for students." };
   if (!mongoose.Types.ObjectId.isValid(batchId)) return { valid: false, message: "Invalid batch ID." };
@@ -86,15 +105,10 @@ async function resolveFacultyId(input, cache) {
   return facId;
 }
 
-/** Resolve Batch under a faculty by:
- *   - _id (verifies it belongs to faculty)
- *   - start year / year (number)
- *   - batchname or code (exact, case-insensitive)
- */
+/** Resolve Batch under a faculty by id/year/batchname/code */
 async function resolveBatchId({ facultyId, batchInput }) {
   if (!batchInput || !facultyId) return null;
 
-  // If it's an ObjectId, ensure it belongs to the faculty
   if (isObjectId(batchInput)) {
     const b = await Batch.findOne({ _id: batchInput, faculty: facultyId }).select("_id");
     return b ? b._id.toString() : null;
@@ -105,10 +119,8 @@ async function resolveBatchId({ facultyId, batchInput }) {
 
   const orConds = [];
   if (Number.isFinite(maybeYear)) {
-    // Use whichever you actually have in your schema (year / startYear / start_year)
     orConds.push({ year: maybeYear }, { startYear: maybeYear }, { start_year: maybeYear });
   }
-  // Also allow exact match on batchname/code (case-insensitive)
   orConds.push(
     { batchname: new RegExp(`^${escRe(key)}$`, "i") },
     { code: new RegExp(`^${escRe(key)}$`, "i") }
@@ -154,13 +166,11 @@ userRouter.post("/users", authmiddleware, authorizedRole("admin"), async (req, r
       if (!batchValidation.valid) {
         return res.status(400).json({ field: "batch", message: batchValidation.message });
       }
-    } else {
-      if (batch) {
-        return res.status(400).json({ field: "batch", message: "Batch can only be assigned to students." });
-      }
+    } else if (batch) {
+      return res.status(400).json({ field: "batch", message: "Batch can only be assigned to students." });
     }
 
-    const existingUser = await User.findOne({ email });
+    const existingUser = await User.findOne({ email: String(email).toLowerCase().trim() });
     if (existingUser) {
       return res.status(400).json({ message: "User with this email already exists." });
     }
@@ -169,7 +179,7 @@ userRouter.post("/users", authmiddleware, authorizedRole("admin"), async (req, r
 
     const newUser = new User({
       username,
-      email,
+      email: String(email).toLowerCase().trim(),
       password: hashedPassword,
       role,
       googleId: null,
@@ -216,7 +226,6 @@ userRouter.post(
       const usersToInsert = [];
       const facultyCache = Object.create(null);
 
-      // A small sanitizer so CSV quirks don't break validation
       const sanitizeRow = (row) => {
         let {
           username = "",
@@ -228,7 +237,6 @@ userRouter.post(
         } = row || {};
 
         username = String(username).trim();
-        // fix 'aakash .703...' -> 'aakash.703...'
         email = String(email).trim().replace(/\s+\./g, ".").toLowerCase();
         password = String(password).trim();
         role = String(role).trim().toLowerCase();
@@ -238,7 +246,6 @@ userRouter.post(
         return { username, email, password, role, batch, faculty };
       };
 
-      // ---------- CSV case ----------
       if (req.file) {
         const rows = await parseCSV(req.file.path);
         if (!Array.isArray(rows) || rows.length === 0) {
@@ -248,7 +255,6 @@ userRouter.post(
         for (let i = 0; i < rows.length; i++) {
           let { username, email, password, role, batch, faculty } = sanitizeRow(rows[i]);
 
-          // Requireds
           if (!username || !email || !password || !role) {
             const missingField = !username ? "username" : !email ? "email" : !password ? "password" : "role";
             return res.status(400).json({
@@ -285,7 +291,6 @@ userRouter.post(
           }
 
           if (role === "student") {
-            // NOW: faculty+batch are used to resolve Batch under a Faculty
             if (!faculty) {
               return res.status(400).json({
                 rowIndex: i,
@@ -311,9 +316,8 @@ userRouter.post(
               });
             }
 
-            batch = batchId; // resolved _id
+            batch = batchId;
           } else {
-            // Non-students must not include batch/faculty
             if (batch) {
               return res.status(400).json({
                 rowIndex: i,
@@ -341,10 +345,7 @@ userRouter.post(
             isVerified: false,
           });
         }
-      }
-
-      // ---------- JSON array case ----------
-      else if (Array.isArray(req.body.users)) {
+      } else if (Array.isArray(req.body.users)) {
         for (let i = 0; i < req.body.users.length; i++) {
           let { username, email, password, role, batch, faculty } = sanitizeRow(req.body.users[i]);
 
@@ -444,12 +445,11 @@ userRouter.post(
         });
       }
 
-      // Duplicates by email before inserting
-      const emails = usersToInsert.map((u) => u.email);
+      const emails = usersToInsert.map(u => u.email);
       const existing = await User.find({ email: { $in: emails } }).select("email");
       if (existing.length > 0) {
         return res.status(400).json({
-          message: `Users with these emails already exist: ${existing.map((u) => u.email).join(", ")}`,
+          message: `Users with these emails already exist: ${existing.map(u => u.email).join(", ")}`,
         });
       }
 
@@ -457,7 +457,7 @@ userRouter.post(
 
       res.status(201).json({
         message: `${inserted.length} users created successfully.`,
-        users: inserted.map((u) => ({
+        users: inserted.map(u => ({
           id: u._id,
           username: u.username,
           email: u.email,
@@ -474,7 +474,7 @@ userRouter.post(
   }
 );
 
-// PATCH update user
+// PATCH update user (prevent manual googleId tampering)
 userRouter.patch("/users/:id", authmiddleware, authorizedRole("admin"), async (req, res) => {
   try {
     if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
@@ -503,19 +503,20 @@ userRouter.patch("/users/:id", authmiddleware, authorizedRole("admin"), async (r
           return res.status(400).json({ field: "batch", message: "Batch not found." });
         }
       }
-    } else {
-      if (batch) {
-        return res.status(400).json({ field: "batch", message: "Batch can only be assigned to students." });
-      }
+    } else if (batch) {
+      return res.status(400).json({ field: "batch", message: "Batch can only be assigned to students." });
     }
 
     if (username) user.username = username;
-    if (email) user.email = email;
+    if (email) user.email = String(email).toLowerCase().trim();
     if (password) user.password = await bcrypt.hash(password, 10);
-    if (typeof isActive !== "undefined") user.isActive = isActive;
+    if (typeof isActive   !== "undefined") user.isActive   = isActive;
     if (typeof isVerified !== "undefined") user.isVerified = isVerified;
     if (batch !== undefined) user.batch = batch;
     if (role) user.role = role;
+
+    // Protect googleId from being changed here (admin unlink can be a dedicated route if needed)
+    // if ('googleId' in req.body) { /* ignore or reject */ }
 
     await user.save();
 
@@ -583,7 +584,7 @@ userRouter.get("/users", authmiddleware, authorizedRole("admin"), async (req, re
 
     if (role === "student" && faculty && mongoose.Types.ObjectId.isValid(faculty)) {
       const batches = await Batch.find({ faculty }).select("_id").lean();
-      const batchIds = batches.map((b) => b._id.toString());
+      const batchIds = batches.map(b => b._id.toString());
       if (batch && mongoose.Types.ObjectId.isValid(batch) && batchIds.includes(batch)) {
         filter.batch = batch;
       } else {
@@ -629,13 +630,10 @@ userRouter.patch("/users/me/password", authmiddleware, async (req, res) => {
     if (!user) return res.status(404).json({ message: "User not found." });
 
     const ok = await bcrypt.compare(currentPassword, user.password);
-    if (!ok) {
-      return res.status(400).json({ field: "currentPassword", message: "Current password is incorrect." });
-    }
+    if (!ok) return res.status(400).json({ field: "currentPassword", message: "Current password is incorrect." });
+
     const isSame = await bcrypt.compare(newPassword, user.password);
-    if (isSame) {
-      return res.status(400).json({ field: "newPassword", message: "New password must be different from current password." });
-    }
+    if (isSame) return res.status(400).json({ field: "newPassword", message: "New password must be different from current password." });
 
     user.password = await bcrypt.hash(newPassword, 10);
     await user.save();
