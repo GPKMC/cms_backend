@@ -1,18 +1,16 @@
+// user-auth.js
 import express from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import User from './user-model.js';
 import { authmiddleware } from './user-middleware.js';
 
-
 const authRouter = express.Router();
 
 authRouter.get('/me', authmiddleware, async (req, res) => {
   try {
-    const user = await User.findById(req.user.id).select('-password'); // Exclude password
-    if (!user) {
-      return res.status(404).json({ message: 'User not found' });
-    }
+    const user = await User.findById(req.user._id).select('-password');
+    if (!user) return res.status(404).json({ message: 'User not found' });
 
     res.status(200).json({
       user: {
@@ -20,6 +18,9 @@ authRouter.get('/me', authmiddleware, async (req, res) => {
         username: user.username,
         email: user.email,
         role: user.role,
+        isActive: user.isActive,
+        isVerified: user.isVerified,
+        googleId: user.googleId,
         createdAt: user.createdAt,
       },
     });
@@ -31,40 +32,32 @@ authRouter.get('/me', authmiddleware, async (req, res) => {
 
 authRouter.post('/login', async (req, res) => {
   try {
-    const { email, password ,role} = req.body;
+    const role = req.body.role;
+    const email = String(req.body.email || '').toLowerCase().trim();
+    const password = req.body.password;
 
-    if (!email || !password)
+    if (!email || !password) {
       return res.status(400).json({ message: "Email and password are required." });
-
-    // Find the user by email
-    const user = await User.findOne({ email });
-    if (!user) {
-      return res.status(400).json({ message: 'Invalid credentials.' });
     }
-if (user.isActive === false) {
+
+    const user = await User.findOne({ email });
+    if (!user) return res.status(400).json({ message: 'Invalid credentials.' });
+
+    if (user.isActive === false) {
       return res.status(403).json({ message: "Your account is disabled. Please contact college administration." });
     }
 
-    // Check role matches
-    if (user.role !== role) {
+    if (role && user.role !== role) {
       return res.status(403).json({ message: `User does not have the role: ${role}` });
     }
 
-    // Compare password
     const isMatch = await bcrypt.compare(password, user.password);
-    if (!isMatch) {
-      return res.status(400).json({ message: 'Invalid credentials.' });
-    }
+    if (!isMatch) return res.status(400).json({ message: 'Invalid credentials.' });
 
-    // Generate JWT token
     const token = jwt.sign(
-      {
-        id: user._id,
-        email: user.email,
-        role: user.role,
-      },
+      { id: user._id, email: user.email, role: user.role },
       process.env.JWT_SECRET,
-      { expiresIn: '7d' } // You can adjust expiration
+      { expiresIn: '7d' }
     );
 
     res.status(200).json({
@@ -75,6 +68,9 @@ if (user.isActive === false) {
         username: user.username,
         email: user.email,
         role: user.role,
+        isActive: user.isActive,
+        isVerified: user.isVerified,
+        googleId: user.googleId,
       },
     });
   } catch (error) {
@@ -84,4 +80,3 @@ if (user.isActive === false) {
 });
 
 export default authRouter;
- 
