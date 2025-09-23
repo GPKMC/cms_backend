@@ -1,6 +1,6 @@
 import express from "express";
 import { authmiddleware, authorizedRole } from "../users/user-middleware.js";
-import upload from "../utlis/multer-config.js";
+import upload from "../utils/multer-config.js";
 import mongoose from "mongoose";
 import questionModel from "./question-model.js";
 import notificationModel from "../functions/notification-model.js";

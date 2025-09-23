@@ -1,6 +1,6 @@
 import express from "express";
 import { authmiddleware, authorizedRole } from "../users/user-middleware.js";
-import upload from "../utlis/multer-config.js";
+import upload from "../utils/multer-config.js";
 import Assignment from "./assignmentModel.js";
 import CourseInstance from "../course/courseinstance-model.js";
 import Notification from "../functions/notification-model.js"
@@ -23,6 +23,7 @@ function makeFileUrls(files) {
 
 
 // CREATE: POST /assignment with notification
+// CREATE: POST /assignment with notification
 AssignmentRouter.post(
   "/",
   upload.fields([
@@ -37,11 +38,12 @@ AssignmentRouter.post(
       const documentFiles = req.files?.documents || [];
 
       // Parse potentially stringified arrays safely
-      const links = req.body.links ? JSON.parse(req.body.links) : [];
-      const youtubeLinks = req.body.youtubeLinks ? JSON.parse(req.body.youtubeLinks) : [];
+      const links         = req.body.links ? JSON.parse(req.body.links) : [];
+      const youtubeLinks  = req.body.youtubeLinks ? JSON.parse(req.body.youtubeLinks) : [];
       const mutedStudents = req.body.mutedStudents ? JSON.parse(req.body.mutedStudents) : [];
-      const visibleTo = req.body.visibleTo ? JSON.parse(req.body.visibleTo) : [];
+      const visibleTo     = req.body.visibleTo ? JSON.parse(req.body.visibleTo) : [];
 
+      // ---- Create assignment ----
       const newAssignment = await Assignment.create({
         title: req.body.title,
         content: req.body.content,
@@ -60,31 +62,55 @@ AssignmentRouter.post(
       });
 
       // --------------- NOTIFICATION LOGIC -----------------
-      let recipients = [];
-      if (visibleTo.length > 0) {
-        recipients = visibleTo;
-      } else {
-        // Find all students in this batch
-        const courseInstance = await CourseInstance.findById(req.body.courseInstance);
-        if (!courseInstance) {
-          return res.status(400).json({ error: "Invalid courseInstance" });
-        }
-        const batchStudents = await User.find({
-          role: "student",
-          batch: courseInstance.batch
-        }).select('_id');
-        recipients = batchStudents.map(s => s._id);
-      }
+      try {
+        let recipients = [];
 
-      await Notification.create({
-        courseInstance: req.body.courseInstance,
-        type: "assignment",
-        refId: newAssignment._id,
-        title: newAssignment.title,
-        message: `New assignment posted: ${newAssignment.title}`,
-        createdBy: req.user._id,
-        recipients,
-      });
+        if (Array.isArray(visibleTo) && visibleTo.length > 0) {
+          // Only include users who are actually students
+          const allowed = await User.find({ _id: { $in: visibleTo }, role: "student" })
+            .select("_id")
+            .lean();
+          recipients = allowed.map(s => s._id);
+        } else {
+          // All students in the batch of this course instance
+          const courseInstance = await CourseInstance.findById(req.body.courseInstance).select("batch").lean();
+          if (!courseInstance?.batch) {
+            console.warn("⚠️ Notification skipped: courseInstance or batch missing");
+          } else {
+            const batchStudents = await User.find({
+              role: "student",
+              batch: courseInstance.batch,
+            }).select("_id").lean();
+            recipients = batchStudents.map(s => s._id);
+          }
+        }
+
+        // De-dupe ObjectIds while keeping them as ObjectIds
+        if (recipients.length > 1) {
+          const map = new Map();
+          for (const id of recipients) map.set(String(id), id);
+          recipients = [...map.values()];
+        }
+
+        // Nothing to notify? Don’t create a useless notification document
+        if (!recipients.length) {
+          console.warn("⚠️ Notification skipped: no recipients resolved");
+        } else {
+          await Notification.create({
+            courseInstance: req.body.courseInstance,
+            type: "assignment",
+            refId: newAssignment._id,
+            title: newAssignment.title,
+            message: `New assignment posted: ${newAssignment.title}`,
+            createdBy: req.user._id,   // teacher’s _id
+            recipients,                // array of student _ids
+          });
+          // (Emails will be sent by the Notification model's post-save hook)
+        }
+      } catch (notifyErr) {
+        // Never fail the request because mail/notification failed
+        console.error("Notification/email error:", notifyErr);
+      }
       // ----------------------------------------------------
 
       res.status(201).json({ assignment: newAssignment });
@@ -93,6 +119,7 @@ AssignmentRouter.post(
     }
   }
 );
+
 
 // GET ALL assignments for a courseInstance
 AssignmentRouter.get(

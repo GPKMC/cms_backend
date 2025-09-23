@@ -4,7 +4,7 @@ import { body, param, oneOf, validationResult } from "express-validator";
 import mongoose from "mongoose";
 import groupAssignmentModel from "./groupAssignment-model.js";
 import { authmiddleware, authorizedRole } from "../users/user-middleware.js";
-import upload from "../utlis/multer-config.js";
+import upload from "../utils/multer-config.js";
 import CourseInstance from "../course/courseinstance-model.js";
 import Notification from "../functions/notification-model.js"
 const GroupAssignmentRouter = express.Router();

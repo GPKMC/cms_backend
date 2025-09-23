@@ -1,7 +1,7 @@
 import express from "express";
 import mongoose from "mongoose";
 import { authmiddleware, authorizedRole } from "../users/user-middleware.js";
-import upload from "../utlis/multer-config.js";
+import upload from "../utils/multer-config.js";
 import CourseMaterial from "./courseMaterials-model.js";
 import CourseInstance from "./courseinstance-model.js";
 import notificationModel from "../functions/notification-model.js";

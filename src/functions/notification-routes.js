@@ -1,3 +1,4 @@
+// notification routes for fetching  notifications related to assignments,announcements and many more
 import express from "express";
 import Notification from "./notification-model.js";
 import CourseInstance from "../course/courseinstance-model.js";

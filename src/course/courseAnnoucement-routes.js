@@ -2,7 +2,7 @@ import express from "express";
 import mongoose from "mongoose";
 import CourseAnnouncement from "./courseAnnouncement-model.js";
 import { authmiddleware, authorizedRole } from "../users/user-middleware.js";
-import upload from "../utlis/multer-config.js";
+import upload from "../utils/multer-config.js";
 import CourseInstance from "./courseinstance-model.js";
 import User from "../users/user-model.js";
 import notificationModel from "../functions/notification-model.js";

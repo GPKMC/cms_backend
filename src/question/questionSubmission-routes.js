@@ -2,7 +2,7 @@ import express from 'express';
 import mongoose from 'mongoose';
 import { HfInference } from '@huggingface/inference';
 import { authmiddleware, authorizedRole } from '../users/user-middleware.js';
-import { cosineSimilarity } from '../utlis/cosine-similarity.js';
+import { cosineSimilarity } from '../utils/cosine-similarity.js';
 import dotenv from 'dotenv';
 import questionSubmissionModel from './questionSubmission-model.js';
 import AssignmentSubmissionModel from '../assignment/AssignmentSubmission-model.js';

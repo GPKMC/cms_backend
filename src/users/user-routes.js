@@ -7,7 +7,7 @@ import Batch from "../batch/batch-model.js";
 import Faculty from "../faculty/faculty-model.js";
 import { authmiddleware, authorizedRole } from "./user-middleware.js";
 import { upload } from "../middleware/upload.js";
-import { parseCSV } from "../utlis/parseCsv.js";
+import { parseCSV } from "../utils/parseCsv.js";
 
 const userRouter = express.Router();
 
