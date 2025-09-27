@@ -146,7 +146,7 @@ async function sendLeaveEmails({ role, type, status = "pending", data }) {
 
 /* ============================================================================
  * PUBLIC: Get templates + day parts (role-aware)
- * ==========================================================================*/
+
 
 // ✅ BUGFIX: your snippet had `router.get`—use `leaveRouter.get`
 leaveRouter.get("/templates", authmiddleware, (req, res) => {
