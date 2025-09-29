@@ -253,6 +253,55 @@ leaveRouter.get(
   }
 );
 
+// List by status for admin (history)
+
+// routes/leave.routes.js (same file as your other leaveRouter routes)
+leaveRouter.get(
+  "/admin/pending/count",
+  authmiddleware,
+  authorizedRole("admin"),
+  async (req, res) => {
+    try {
+      const role = req.query.role; // "teacher" | "student" | undefined
+      const q = { status: "pending" };
+      if (role) q.role = String(role);
+      const count = await LeaveRequest.countDocuments(q);
+      res.json({ count });
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
+  }
+);
+
+
+leaveRouter.get(
+  "/admin/requests",
+  authmiddleware,
+  authorizedRole("admin"),
+  async (req, res) => {
+    try {
+      const { role, status, from, to, limit = 100 } = req.query;
+      const q = {};
+      if (role) q.role = String(role); // "teacher" | "student"
+      if (status && status !== "all") q.status = String(status); // "approved" | "rejected" | "cancelled"
+      if (from || to) {
+        q.leaveDate = {};
+        if (from) q.leaveDate.$gte = String(from);
+        if (to) q.leaveDate.$lte = String(to);
+      }
+      const items = await LeaveRequest.find(q)
+        .sort({ leaveDate: -1, createdAt: -1 })
+        .limit(Number(limit) || 100)
+        .populate("user", "username email role")
+        .lean();
+      res.json({ items });
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
+  }
+);
+
+
 leaveRouter.patch(
   "/teacher/:id/cancel",
   authmiddleware,
