@@ -1,3 +1,4 @@
+// src/leave/leave-template.js
 import mongoose from "mongoose";
 const { Schema } = mongoose;
 
@@ -10,9 +11,9 @@ const LeaveEmailTemplateSchema = new Schema(
   {
     role: { type: String, enum: ["teacher", "student"], required: true },
     type: { type: String, required: true },
-    subject: { type: String, required: true },           // e.g., "[Leave Request][Teacher] {date} – {type} — {name}"
-    html: { type: String, required: true },              // HTML body with {placeholders}
-    text: { type: String, required: true },              // Plain text fallback
+    subject: { type: String, required: true }, // e.g., "[Leave Request][Teacher] {leaveDate} – {type} — {name}"
+    html: { type: String, required: true },    // HTML body with {placeholders}
+    text: { type: String, required: true },    // Plain text fallback
     enabled: { type: Boolean, default: true },
   },
   { timestamps: true }
@@ -20,4 +21,5 @@ const LeaveEmailTemplateSchema = new Schema(
 
 LeaveEmailTemplateSchema.index({ role: 1, type: 1 }, { unique: true });
 
-export default mongoose.model("LeaveEmailTemplate", LeaveEmailTemplateSchema);
+export default mongoose.models.LeaveEmailTemplate ||
+  mongoose.model("LeaveEmailTemplate", LeaveEmailTemplateSchema);

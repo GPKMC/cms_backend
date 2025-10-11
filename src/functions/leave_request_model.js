@@ -1,3 +1,4 @@
+// src/leave/leave_request_model.js
 import mongoose from "mongoose";
 const { Schema } = mongoose;
 
@@ -37,4 +38,5 @@ const LeaveRequestSchema = new Schema(
 // Helpful indexes
 LeaveRequestSchema.index({ user: 1, leaveDate: 1, status: 1 });
 
-export default mongoose.model("LeaveRequest", LeaveRequestSchema);
+export default mongoose.models.LeaveRequest ||
+  mongoose.model("LeaveRequest", LeaveRequestSchema);
