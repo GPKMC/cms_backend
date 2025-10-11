@@ -1,16 +1,17 @@
+// routes/leave.routes.js
 import express from "express";
 import LeaveRequest from "./leave_request_model.js";
 import LeaveEmailTemplate from "./leave-template.js";
 import { authmiddleware, authorizedRole } from "../users/user-middleware.js";
-// If you have a User model and want to populate names/emails reliably:
 import User from "../users/user-model.js";
 
-// ✅ Your mailer utils (you already have these in the project)
 import {
   getTransporter,
   getMailFrom,
   getReplyTo,
   applyDebugRouting,
+  getPreviewUrl,
+  getDriverName,
 } from "../utils/mailer.js";
 
 const leaveRouter = express.Router();
@@ -18,23 +19,40 @@ const leaveRouter = express.Router();
 /* ---------- helpers ---------- */
 const TZ = "Asia/Kathmandu";
 const ymdInTZ = (d = new Date(), tz = TZ) =>
-  new Intl.DateTimeFormat("en-CA", { timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit" }).format(d);
-// en-CA yields "YYYY-MM-DD"
+  new Intl.DateTimeFormat("en-CA", {
+    timeZone: tz,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(d);
+// en-CA -> "YYYY-MM-DD"
 const isPast = (ymd) => ymd < ymdInTZ();
 
 const TYPES = [
-  { id: "sick",      label: "Sick Leave",            defaultReason: "Feeling unwell; requesting rest for recovery." },
-  { id: "emergency", label: "Emergency Leave",       defaultReason: "Urgent personal emergency; requesting leave." },
-  { id: "function",  label: "Function/Program",      defaultReason: "Attending an important function/program." },
-  { id: "puja",      label: "Puja/Worship",          defaultReason: "Observing a religious puja/ritual." },
-  { id: "personal",  label: "Personal Work",         defaultReason: "Personal work that requires my presence." },
-  { id: "other",     label: "Other",                 defaultReason: "" },
+  { id: "sick",      label: "Sick Leave",       defaultReason: "Feeling unwell; requesting rest for recovery." },
+  { id: "emergency", label: "Emergency Leave",  defaultReason: "Urgent personal emergency; requesting leave." },
+  { id: "function",  label: "Function/Program", defaultReason: "Attending an important function/program." },
+  { id: "puja",      label: "Puja/Worship",     defaultReason: "Observing a religious puja/ritual." },
+  { id: "personal",  label: "Personal Work",    defaultReason: "Personal work that requires my presence." },
+  { id: "other",     label: "Other",            defaultReason: "" },
 ];
 
-// Admin inbox (comma-separated). Fallback to MAIL_FROM if not set.
-const ADMIN_LEAVE_TO = (process.env.ADMIN_LEAVE_TO || process.env.MAIL_FROM || "").split(",").map(s => s.trim()).filter(Boolean);
+const ADMIN_LEAVE_TO = (process.env.ADMIN_LEAVE_TO || process.env.MAIL_FROM || "")
+  .split(",")
+  .map((s) => s.trim())
+  .filter(Boolean);
 
-// Basic HTML wrapper
+function typeLabel(type) {
+  return TYPES.find((t) => t.id === String(type))?.label || String(type);
+}
+function typeDefault(type) {
+  return TYPES.find((t) => t.id === String(type))?.defaultReason || "";
+}
+/** Merge reason with sensible fallback order. */
+function mergeReason(type, { reason, customMessage, rejectionReason } = {}) {
+  return (customMessage || rejectionReason || reason || typeDefault(type)).trim();
+}
+
 const wrapHtml = (inner) => `
   <div style="font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;line-height:1.45;color:#111">
     <div style="border:1px solid #e5e7eb;border-radius:10px;padding:16px;max-width:700px">
@@ -45,20 +63,24 @@ const wrapHtml = (inner) => `
   </div>
 `;
 
-// Default subjects and bodies (used when no DB template found)
 function defaultSubject(role, type, data) {
   const who = role === "teacher" ? "Teacher" : "Student";
   return `[Leave Request][${who}] ${data.leaveDate} – ${typeLabel(type)} — ${data.name}`;
 }
-function typeLabel(type) {
-  return TYPES.find(t => t.id === type)?.label || type;
-}
+
 function defaultHtml(role, type, data, status = "pending") {
   const who = role === "teacher" ? "Teacher" : "Student";
-  const badgeColor = status === "approved" ? "#059669" : status === "rejected" ? "#dc2626" : "#2563eb";
-  const badgeBg = status === "approved" ? "#ecfdf5" : status === "rejected" ? "#fef2f2" : "#eff6ff";
-  const reason = (data.customMessage || data.reason || "").trim();
-  const dayPart = data.dayPart === "first_half" ? "First Half" : data.dayPart === "second_half" ? "Second Half" : "Full Day";
+  const badgeColor =
+    status === "approved" ? "#059669" : status === "rejected" ? "#dc2626" : "#2563eb";
+  const badgeBg =
+    status === "approved" ? "#ecfdf5" : status === "rejected" ? "#fef2f2" : "#eff6ff";
+  const reason = mergeReason(type, data);
+  const dayPart =
+    data.dayPart === "first_half"
+      ? "First Half"
+      : data.dayPart === "second_half"
+      ? "Second Half"
+      : "Full Day";
   return wrapHtml(`
     <h2 style="margin:0 0 8px">Leave Request — ${who}</h2>
     <div style="display:inline-block;font-size:12px;padding:2px 8px;border-radius:999px;background:${badgeBg};color:${badgeColor};border:1px solid ${badgeColor}">${status.toUpperCase()}</div>
@@ -74,19 +96,28 @@ function defaultHtml(role, type, data, status = "pending") {
     </table>
   `);
 }
+
 function defaultText(role, type, data, status = "pending") {
   const who = role === "teacher" ? "Teacher" : "Student";
-  const dayPart = data.dayPart === "first_half" ? "First Half" : data.dayPart === "second_half" ? "Second Half" : "Full Day";
+  const dayPart =
+    data.dayPart === "first_half"
+      ? "First Half"
+      : data.dayPart === "second_half"
+      ? "Second Half"
+      : "Full Day";
+  const reason = mergeReason(type, data);
   return [
     `Leave Request — ${who} [${status.toUpperCase()}]`,
     `Name: ${data.name} (${data.email})`,
     `Role: ${who}`,
     `Date: ${data.leaveDate} (${dayPart})`,
     `Type: ${typeLabel(type)}`,
-    data.customMessage || data.reason ? `Reason: ${data.customMessage || data.reason}` : null,
+    reason ? `Reason: ${reason}` : null,
     "",
-    "GPKMC eCampus"
-  ].filter(Boolean).join("\n");
+    "GPKMC eCampus",
+  ]
+    .filter(Boolean)
+    .join("\n");
 }
 
 async function loadTemplate(role, type) {
@@ -94,54 +125,77 @@ async function loadTemplate(role, type) {
   return tpl || null;
 }
 function fillTemplate(tplStr, data) {
-  // Replace {placeholders} in template strings
   return tplStr.replace(/\{(\w+)\}/g, (_, k) => data?.[k] ?? "");
 }
 
-/** Send emails:
- *  - To Admin inbox (pending)
- *  - To requester (confirmation)
- *  - On approval/rejection, notify requester with status
+/** Send emails.
+ *  - status === "pending": send to admin + a copy to requester
+ *  - status in {"approved","rejected"}: send to requester only
  */
 async function sendLeaveEmails({ role, type, status = "pending", data }) {
   const transporter = await getTransporter();
-  const from = await getMailFrom();
-  const replyTo = await getReplyTo(); // often noreply@ but you can set to admin inbox if desired
+  const { email: fromEmail, name: fromName } = getMailFrom();
+  const { replyToEmail, replyToName } = getReplyTo();
 
-  // Load DB template (if any)
   const tpl = await loadTemplate(role, type);
-
-  // Build subject/HTML/text for admin & requester
-  const subject = tpl ? fillTemplate(tpl.subject, data) : defaultSubject(role, type, data);
+  const subjectBase = data.subject || (tpl ? fillTemplate(tpl.subject, data) : defaultSubject(role, type, data));
   const html = tpl ? fillTemplate(tpl.html, data) : defaultHtml(role, type, data, status);
   const text = tpl ? fillTemplate(tpl.text, data) : defaultText(role, type, data, status);
 
-  const adminTo = ADMIN_LEAVE_TO.length ? ADMIN_LEAVE_TO : [from.address || from];
+  const adminTo = ADMIN_LEAVE_TO.length ? ADMIN_LEAVE_TO : [fromEmail];
   const reqTo = [data.email].filter(Boolean);
 
-  // ⚙️ Route through debug rules if you use them (e.g., in dev)
-  const adminMail = applyDebugRouting({
-    from,
-    to: adminTo,
-    replyTo: data.email || replyTo,
-    subject,
+  const baseMessage = {
+    from: `${fromName} <${fromEmail}>`,
+    replyTo: data.email
+      ? `${data.name || "User"} <${data.email}>`
+      : `${replyToName} <${replyToEmail}>`,
+    subject: subjectBase,
     text,
     html,
-  });
-  const requesterMail = applyDebugRouting({
-    from,
-    to: reqTo,
-    replyTo,
-    subject: `[Copy] ${subject}`,
-    text,
-    html,
-  });
+  };
 
-  // Send (ignore failures individually)
-  const results = [];
-  try { results.push(await transporter.sendMail(adminMail)); } catch (e) { results.push({ error: e.message }); }
-  try { results.push(await transporter.sendMail(requesterMail)); } catch (e) { results.push({ error: e.message }); }
-  return results;
+  const driver = getDriverName();
+
+  // Pending -> admin + copy to requester
+  if (status === "pending") {
+    // Admin
+    {
+      const routed = applyDebugRouting({ to: adminTo, bcc: undefined });
+      const info = await transporter.sendMail({ ...baseMessage, ...routed });
+      const pv = getPreviewUrl(info);
+      console.log(`[leave:mail][pending][${driver}] admin ->`, routed.to || routed.bcc, pv || info.messageId);
+    }
+    // Requester copy
+    if (reqTo.length) {
+      const routed = applyDebugRouting({ to: reqTo, bcc: undefined });
+      const info = await transporter.sendMail({
+        ...baseMessage,
+        ...routed,
+        subject: `[Copy] ${subjectBase}`,
+      });
+      const pv = getPreviewUrl(info);
+      console.log(`[leave:mail][pending][${driver}] requester ->`, routed.to || routed.bcc, pv || info.messageId);
+    }
+    return;
+  }
+
+  // Decision -> requester only
+  if (reqTo.length) {
+    const routed = applyDebugRouting({ to: reqTo, bcc: undefined });
+    const info = await transporter.sendMail({
+      ...baseMessage,
+      ...routed,
+      subject:
+        status === "approved"
+          ? `✅ Leave approved — ${subjectBase}`
+          : status === "rejected"
+          ? `❌ Leave rejected — ${subjectBase}`
+          : subjectBase,
+    });
+    const pv = getPreviewUrl(info);
+    console.log(`[leave:mail][decision ${status}][${driver}] requester ->`, routed.to || routed.bcc, pv || info.messageId);
+  }
 }
 
 /* ============================================================================
@@ -151,20 +205,16 @@ async function sendLeaveEmails({ role, type, status = "pending", data }) {
 // ✅ BUGFIX: your snippet had `router.get`—use `leaveRouter.get`
 leaveRouter.get("/templates", authmiddleware, (req, res) => {
   const role = String(req.query.role || "").toLowerCase();
-  const filteredTypes = (role === "teacher" || role === "student")
-    ? TYPES
-    : TYPES;
   res.json({
     role: (role === "teacher" || role === "student") ? role : undefined,
-    types: filteredTypes,
+    types: TYPES,
     dayParts: ["full", "first_half", "second_half"],
   });
 });
 
 /* ============================================================================
- * TEACHER ENDPOINTS
+ * TEACHER
  * ==========================================================================*/
-
 leaveRouter.post(
   "/teacher/request",
   authmiddleware,
@@ -179,11 +229,11 @@ leaveRouter.post(
         type,
         dayPart = "full",
         reason = "",
-        customMessage = "",   // optional: lets teacher tweak email body text
-        customSubject = "",   // optional: subject override
+        customMessage = "",
+        customSubject = "",
       } = req.body || {};
 
-      if (!type || !TYPES.some(t => t.id === String(type))) return res.status(400).json({ error: "Invalid leave type" });
+      if (!type || !TYPES.some((t) => t.id === String(type))) return res.status(400).json({ error: "Invalid leave type" });
       if (!["full", "first_half", "second_half"].includes(dayPart)) return res.status(400).json({ error: "Invalid dayPart" });
       if (!leaveDate || typeof leaveDate !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(leaveDate)) return res.status(400).json({ error: "leaveDate must be 'YYYY-MM-DD'" });
       if (isPast(leaveDate)) return res.status(400).json({ error: "Cannot request leave for past dates" });
@@ -191,18 +241,19 @@ leaveRouter.post(
       const dup = await LeaveRequest.findOne({ user: userId, leaveDate, status: { $in: ["pending", "approved"] } }).lean();
       if (dup) return res.status(409).json({ error: "Leave already requested/approved for this date" });
 
+      const me = await User.findById(userId).select("username email").lean();
+      const mergedReason = mergeReason(type, { reason, customMessage });
+
       const doc = await LeaveRequest.create({
         user: userId,
         role: "teacher",
         leaveDate,
         type,
         dayPart,
-        reason,
+        reason: mergedReason, // store merged
         status: "pending",
       });
 
-      // Compose mail data (fetch user to be safe)
-      const me = await User.findById(userId).select("username email").lean();
       const data = {
         id: String(doc._id),
         name: me?.username || req.user?.username || "Teacher",
@@ -210,14 +261,12 @@ leaveRouter.post(
         leaveDate,
         dayPart,
         type,
-        reason,
-        customMessage: customMessage || reason,
+        reason: mergedReason,
+        customMessage: mergedReason,
+        subject: customSubject || undefined,
       };
-      // Allow subject override if provided
-      if (customSubject) data.subject = customSubject;
 
       await sendLeaveEmails({ role: "teacher", type, status: "pending", data });
-
       res.status(201).json({ ok: true, leave: doc });
     } catch (e) {
       res.status(500).json({ error: e.message });
@@ -253,55 +302,6 @@ leaveRouter.get(
   }
 );
 
-// List by status for admin (history)
-
-// routes/leave.routes.js (same file as your other leaveRouter routes)
-leaveRouter.get(
-  "/admin/pending/count",
-  authmiddleware,
-  authorizedRole("admin"),
-  async (req, res) => {
-    try {
-      const role = req.query.role; // "teacher" | "student" | undefined
-      const q = { status: "pending" };
-      if (role) q.role = String(role);
-      const count = await LeaveRequest.countDocuments(q);
-      res.json({ count });
-    } catch (e) {
-      res.status(500).json({ error: e.message });
-    }
-  }
-);
-
-
-leaveRouter.get(
-  "/admin/requests",
-  authmiddleware,
-  authorizedRole("admin"),
-  async (req, res) => {
-    try {
-      const { role, status, from, to, limit = 100 } = req.query;
-      const q = {};
-      if (role) q.role = String(role); // "teacher" | "student"
-      if (status && status !== "all") q.status = String(status); // "approved" | "rejected" | "cancelled"
-      if (from || to) {
-        q.leaveDate = {};
-        if (from) q.leaveDate.$gte = String(from);
-        if (to) q.leaveDate.$lte = String(to);
-      }
-      const items = await LeaveRequest.find(q)
-        .sort({ leaveDate: -1, createdAt: -1 })
-        .limit(Number(limit) || 100)
-        .populate("user", "username email role")
-        .lean();
-      res.json({ items });
-    } catch (e) {
-      res.status(500).json({ error: e.message });
-    }
-  }
-);
-
-
 leaveRouter.patch(
   "/teacher/:id/cancel",
   authmiddleware,
@@ -323,9 +323,8 @@ leaveRouter.patch(
 );
 
 /* ============================================================================
- * STUDENT ENDPOINTS (same flow, different role + templates)
+ * STUDENT
  * ==========================================================================*/
-
 leaveRouter.post(
   "/student/request",
   authmiddleware,
@@ -344,7 +343,7 @@ leaveRouter.post(
         customSubject = "",
       } = req.body || {};
 
-      if (!type || !TYPES.some(t => t.id === String(type))) return res.status(400).json({ error: "Invalid leave type" });
+      if (!type || !TYPES.some((t) => t.id === String(type))) return res.status(400).json({ error: "Invalid leave type" });
       if (!["full", "first_half", "second_half"].includes(dayPart)) return res.status(400).json({ error: "Invalid dayPart" });
       if (!leaveDate || typeof leaveDate !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(leaveDate)) return res.status(400).json({ error: "leaveDate must be 'YYYY-MM-DD'" });
       if (isPast(leaveDate)) return res.status(400).json({ error: "Cannot request leave for past dates" });
@@ -352,17 +351,19 @@ leaveRouter.post(
       const dup = await LeaveRequest.findOne({ user: userId, leaveDate, status: { $in: ["pending", "approved"] } }).lean();
       if (dup) return res.status(409).json({ error: "Leave already requested/approved for this date" });
 
+      const me = await User.findById(userId).select("username email").lean();
+      const mergedReason = mergeReason(type, { reason, customMessage });
+
       const doc = await LeaveRequest.create({
         user: userId,
         role: "student",
         leaveDate,
         type,
         dayPart,
-        reason,
+        reason: mergedReason, // store merged
         status: "pending",
       });
 
-      const me = await User.findById(userId).select("username email").lean();
       const data = {
         id: String(doc._id),
         name: me?.username || req.user?.username || "Student",
@@ -370,13 +371,12 @@ leaveRouter.post(
         leaveDate,
         dayPart,
         type,
-        reason,
-        customMessage: customMessage || reason,
+        reason: mergedReason,
+        customMessage: mergedReason,
+        subject: customSubject || undefined,
       };
-      if (customSubject) data.subject = customSubject;
 
       await sendLeaveEmails({ role: "student", type, status: "pending", data });
-
       res.status(201).json({ ok: true, leave: doc });
     } catch (e) {
       res.status(500).json({ error: e.message });
@@ -433,21 +433,66 @@ leaveRouter.patch(
 );
 
 /* ============================================================================
- * ADMIN: pending list + approve/reject (for any role)
+ * ADMIN: pending/history + approve/reject
  * ==========================================================================*/
-
 leaveRouter.get(
   "/admin/pending",
   authmiddleware,
   authorizedRole("admin"),
   async (req, res) => {
     try {
-      const role = req.query.role; // optional filter: "teacher" | "student"
+      const role = req.query.role; // optional: "teacher" | "student"
       const q = { status: "pending" };
       if (role) q.role = role;
       const items = await LeaveRequest.find(q)
         .sort({ leaveDate: 1, createdAt: 1 })
         .limit(100)
+        .populate("user", "username email role")
+        .lean();
+      res.json({ items });
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
+  }
+);
+
+// count for navbar badge
+leaveRouter.get(
+  "/admin/pending/count",
+  authmiddleware,
+  authorizedRole("admin"),
+  async (req, res) => {
+    try {
+      const role = req.query.role;
+      const q = { status: "pending" };
+      if (role) q.role = String(role);
+      const count = await LeaveRequest.countDocuments(q);
+      res.json({ count });
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
+  }
+);
+
+// history
+leaveRouter.get(
+  "/admin/requests",
+  authmiddleware,
+  authorizedRole("admin"),
+  async (req, res) => {
+    try {
+      const { role, status, from, to, limit = 100 } = req.query;
+      const q = {};
+      if (role) q.role = String(role);
+      if (status && status !== "all") q.status = String(status);
+      if (from || to) {
+        q.leaveDate = {};
+        if (from) q.leaveDate.$gte = String(from);
+        if (to) q.leaveDate.$lte = String(to);
+      }
+      const items = await LeaveRequest.find(q)
+        .sort({ leaveDate: -1, createdAt: -1 })
+        .limit(Number(limit) || 100)
         .populate("user", "username email role")
         .lean();
       res.json({ items });
@@ -463,15 +508,18 @@ leaveRouter.patch(
   authorizedRole("admin"),
   async (req, res) => {
     try {
-      const doc = await LeaveRequest.findById(req.params.id).populate("user", "username email role").exec();
+      const doc = await LeaveRequest.findById(req.params.id)
+        .populate("user", "username email role")
+        .exec();
       if (!doc) return res.status(404).json({ error: "Not found" });
       if (doc.status !== "pending") return res.status(400).json({ error: "Only pending requests can be approved" });
+
       doc.status = "approved";
       doc.approvedBy = req.user?._id;
       doc.approvedAt = new Date();
       await doc.save();
 
-      // Notify requester
+      const merged = mergeReason(doc.type, { reason: doc.reason });
       const data = {
         id: String(doc._id),
         name: doc.user?.username || "User",
@@ -479,8 +527,8 @@ leaveRouter.patch(
         leaveDate: doc.leaveDate,
         dayPart: doc.dayPart,
         type: doc.type,
-        reason: doc.reason,
-        customMessage: doc.reason,
+        reason: merged,
+        customMessage: merged,
       };
       await sendLeaveEmails({ role: doc.role, type: doc.type, status: "approved", data });
 
@@ -498,16 +546,19 @@ leaveRouter.patch(
   async (req, res) => {
     try {
       const { reason = "" } = req.body || {};
-      const doc = await LeaveRequest.findById(req.params.id).populate("user", "username email role").exec();
+      const doc = await LeaveRequest.findById(req.params.id)
+        .populate("user", "username email role")
+        .exec();
       if (!doc) return res.status(404).json({ error: "Not found" });
       if (doc.status !== "pending") return res.status(400).json({ error: "Only pending requests can be rejected" });
+
       doc.status = "rejected";
       doc.rejectionReason = reason;
       doc.approvedBy = req.user?._id;
       doc.approvedAt = new Date();
       await doc.save();
 
-      // Notify requester
+      const merged = mergeReason(doc.type, { reason: doc.reason, rejectionReason: reason });
       const data = {
         id: String(doc._id),
         name: doc.user?.username || "User",
@@ -515,59 +566,12 @@ leaveRouter.patch(
         leaveDate: doc.leaveDate,
         dayPart: doc.dayPart,
         type: doc.type,
-        reason: reason || doc.reason,
-        customMessage: reason || doc.reason,
+        reason: merged,
+        customMessage: merged,
       };
       await sendLeaveEmails({ role: doc.role, type: doc.type, status: "rejected", data });
 
       res.json({ ok: true, leave: doc });
-    } catch (e) {
-      res.status(500).json({ error: e.message });
-    }
-  }
-);
-
-/* ============================================================================
- * ADMIN: email template CRUD (simple)
- * ==========================================================================*/
-
-// List templates (optionally filter by role/type)
-leaveRouter.get(
-  "/admin/templates/email",
-  authmiddleware,
-  authorizedRole("admin"),
-  async (req, res) => {
-    try {
-      const { role, type } = req.query;
-      const q = {};
-      if (role) q.role = String(role);
-      if (type) q.type = String(type);
-      const items = await LeaveEmailTemplate.find(q).sort({ role: 1, type: 1 }).lean();
-      res.json({ items });
-    } catch (e) {
-      res.status(500).json({ error: e.message });
-    }
-  }
-);
-
-// Upsert a template
-leaveRouter.put(
-  "/admin/templates/email",
-  authmiddleware,
-  authorizedRole("admin"),
-  async (req, res) => {
-    try {
-      const { role, type, subject, html, text, enabled = true } = req.body || {};
-      if (!role || !["teacher", "student"].includes(role)) return res.status(400).json({ error: "role must be 'teacher' or 'student'" });
-      if (!type) return res.status(400).json({ error: "Missing type" });
-      if (!subject || !html || !text) return res.status(400).json({ error: "subject, html, text are required" });
-
-      const doc = await LeaveEmailTemplate.findOneAndUpdate(
-        { role, type },
-        { subject, html, text, enabled },
-        { new: true, upsert: true, setDefaultsOnInsert: true }
-      );
-      res.json({ ok: true, template: doc });
     } catch (e) {
       res.status(500).json({ error: e.message });
     }
