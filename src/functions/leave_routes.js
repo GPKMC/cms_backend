@@ -199,8 +199,10 @@ async function sendLeaveEmails({ role, type, status = "pending", data }) {
 }
 
 /* ============================================================================
- * PUBLIC: Templates + day parts
- * ==========================================================================*/
+ * PUBLIC: Get templates + day parts (role-aware)
+
+
+// ✅ BUGFIX: your snippet had `router.get`—use `leaveRouter.get`
 leaveRouter.get("/templates", authmiddleware, (req, res) => {
   const role = String(req.query.role || "").toLowerCase();
   res.json({
