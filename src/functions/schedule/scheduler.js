@@ -14,7 +14,10 @@ const TIME_STEP = 30;
 async function buildCandidates(task) {
   const ci = await CI()
     .findById(task.courseInstanceId)
-    .populate({ path: "course", populate: { path: "semesterOrYear", populate: { path: "faculty" } } })
+    .populate({
+      path: "course",
+      populate: { path: "semesterOrYear", populate: { path: "faculty" } },
+    })
     .populate("batch")
     .populate("teacher")
     .lean();
@@ -22,12 +25,19 @@ async function buildCandidates(task) {
   if (!ci) throw new Error("CourseInstance not found");
 
   const bp = await BatchPeriod()
-    .findOne({ batch: ci.batch?._id, semesterOrYear: ci.course?.semesterOrYear?._id, status: "ongoing" })
+    .findOne({
+      batch: ci.batch?._id,
+      semesterOrYear: ci.course?.semesterOrYear?._id,
+      status: "ongoing",
+    })
     .lean();
   if (!bp) throw new Error("No ongoing BatchPeriod for this CourseInstance");
 
-  const ta = await TeacherAvailability.findOne({ teacher: ci.teacher?._id }).lean();
-  if (!ta || !ta.weeklyWindows?.length) throw new Error("Teacher has no availability");
+  const ta = await TeacherAvailability.findOne({
+    teacher: ci.teacher?._id,
+  }).lean();
+  if (!ta || !ta.weeklyWindows?.length)
+    throw new Error("Teacher has no availability");
 
   const allowedDaysSet = new Set(
     Array.isArray(task.allowedDays) && task.allowedDays.length
@@ -38,7 +48,11 @@ async function buildCandidates(task) {
   const candidates = [];
   for (const w of ta.weeklyWindows) {
     if (!allowedDaysSet.has(w.day)) continue;
-    for (let s = w.startMinutes; s + task.durationMinutes <= w.endMinutes; s += TIME_STEP) {
+    for (
+      let s = w.startMinutes;
+      s + task.durationMinutes <= w.endMinutes;
+      s += TIME_STEP
+    ) {
       const e = s + task.durationMinutes;
       candidates.push({ day: w.day, startMinutes: s, endMinutes: e });
     }
@@ -63,14 +77,16 @@ async function buildExistingBusyMap({ startDate, endDate }) {
     endDate: { $gte: startDate },
   };
 
+  // include courseInstance so we can forbid multiple same-CI sessions per day
   const existing = await ScheduleEvent.find(q)
-    .select("teacher batch daysOfWeek startMinutes endMinutes")
+    .select("courseInstance teacher batch daysOfWeek startMinutes endMinutes")
     .lean();
 
   const busy = { 0: [], 1: [], 2: [], 3: [], 4: [], 5: [], 6: [] };
   for (const e of existing) {
     for (const d of e.daysOfWeek || []) {
       busy[d].push({
+        courseInstance: String(e.courseInstance),
         teacher: String(e.teacher),
         batch: String(e.batch),
         startMinutes: e.startMinutes,
@@ -82,19 +98,30 @@ async function buildExistingBusyMap({ startDate, endDate }) {
 }
 
 function clashes(placed, cand, busy) {
+  // Block if the same CourseInstance is already scheduled that day
   for (const p of placed) {
+    if (p.courseInstance === cand.courseInstance && p.day === cand.day)
+      return true;
+
+    // Original overlap rule (teacher OR batch cannot overlap in time on same day)
     if (
       p.day === cand.day &&
       overlap(p.startMinutes, p.endMinutes, cand.startMinutes, cand.endMinutes) &&
       (p.teacher === cand.teacher || p.batch === cand.batch)
-    ) return true;
+    )
+      return true;
   }
+
   const dayBusy = busy?.[cand.day] || [];
   for (const b of dayBusy) {
+    // Also block if an existing saved event of the same CourseInstance already exists that day
+    if (b.courseInstance === cand.courseInstance) return true;
+
     if (
       overlap(b.startMinutes, b.endMinutes, cand.startMinutes, cand.endMinutes) &&
       (b.teacher === cand.teacher || b.batch === cand.batch)
-    ) return true;
+    )
+      return true;
   }
   return false;
 }
@@ -106,13 +133,17 @@ function forwardCheck(units, idx, placed, busy) {
     let ok = false;
     for (const c of u.candidates) {
       const cand = {
+        courseInstance: u.ciId, // include CI so the same-day CI rule applies in lookahead
         teacher: u.teacher,
         batch: u.batch,
         day: c.day,
         startMinutes: c.startMinutes,
         endMinutes: c.endMinutes,
       };
-      if (!clashes(placed, cand, busy)) { ok = true; break; }
+      if (!clashes(placed, cand, busy)) {
+        ok = true;
+        break;
+      }
     }
     if (!ok) return false;
   }
@@ -193,11 +224,23 @@ export async function solveWeeklyTimetable(tasks, opts = {}) {
     await session.withTransaction(async () => {
       for (const p of placed) {
         const meta = byCi.get(p.courseInstance);
-        const sDate = startDate || (meta?.bp?.startDate ? new Date(meta.bp.startDate) : new Date());
-        const eDate = endDate || (meta?.bp?.endDate ? new Date(meta.bp.endDate) : new Date(sDate.getTime() + 90 * 24 * 3600 * 1000));
+        const sDate =
+          startDate ||
+          (meta?.bp?.startDate ? new Date(meta.bp.startDate) : new Date());
+        const eDate =
+          endDate ||
+          (meta?.bp?.endDate
+            ? new Date(meta.bp.endDate)
+            : new Date(sDate.getTime() + 90 * 24 * 3600 * 1000));
 
-        const ev = await ScheduleEvent.create([{
+        // Include required denormalized fields before validation
+        const event = new ScheduleEvent({
           courseInstance: p.courseInstance,
+          teacher: p.teacher,
+          batch: p.batch,
+          semesterOrYear: p.semesterOrYear,
+          faculty: p.faculty,
+
           type: "lecture",
           recurrence: "weekly",
           daysOfWeek: [p.day],
@@ -205,9 +248,10 @@ export async function solveWeeklyTimetable(tasks, opts = {}) {
           endDate: eDate,
           startMinutes: p.startMinutes,
           endMinutes: p.endMinutes,
-        }], { session });
+        });
 
-        results.push(ev[0]);
+        await event.save({ session });
+        results.push(event);
       }
     });
   } finally {
