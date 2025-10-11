@@ -8,17 +8,15 @@ import CourseInstance from "../course/courseinstance-model.js";
 import User from "../users/user-model.js";
 import notificationModel from "../functions/notification-model.js";
 
+
 const QuizRouter = express.Router();
 
-// ───────────────── helpers ─────────────────
+/* ───────────────── helpers ───────────────── */
 function validate(req, res, next) {
   const errs = validationResult(req);
-  if (!errs.isEmpty()) {
-    return res.status(400).json({ errors: errs.array() });
-  }
+  if (!errs.isEmpty()) return res.status(400).json({ errors: errs.array() });
   next();
 }
-
 const isFutureDate = (value) => {
   const ts = new Date(value).getTime();
   if (isNaN(ts)) throw new Error("Invalid date format");
@@ -26,7 +24,7 @@ const isFutureDate = (value) => {
   return true;
 };
 
-// ─── 1) Create a quiz ─────────────────────
+/* ─── 1) Create a quiz (DRAFT by default) ───────────────────── */
 QuizRouter.post(
   "/",
   authmiddleware,
@@ -36,65 +34,52 @@ QuizRouter.post(
     body("description").optional().isString(),
     body("courseInstance").isMongoId(),
     body("dueDate").optional().isISO8601().bail().custom(isFutureDate),
+    body("published").optional().isBoolean(), // allow explicit create-as-published if you want
   ],
   validate,
   async (req, res, next) => {
     try {
       const quiz = await QuizQuestion.create({
         title: req.body.title,
-        description: req.body.description,
+        description: req.body.description || "",
         courseInstance: req.body.courseInstance,
         postedBy: req.user._id,
         dueDate: req.body.dueDate,
+        published: !!req.body.published, // still safe; you can force false if you want drafts only
+        publishedAt: req.body.published ? new Date() : undefined,
       });
 
-      // Notify students in the course's batch (optional)
-      try {
-        let recipients = [];
-        const courseInstance = await CourseInstance.findById(quiz.courseInstance);
-        if (courseInstance) {
-          const batchStudents = await User.find({
-            role: "student",
-            batch: courseInstance.batch,
-          }).select("_id");
-          recipients = batchStudents.map((s) => String(s._id));
-        }
-        if (recipients.length) {
-          await notificationModel.create({
-            courseInstance: quiz.courseInstance,
-            type: "quiz",
-            refId: quiz._id,
-            title: quiz.title,
-            message: `New quiz posted: ${quiz.title}`,
-            createdBy: req.user._id,
-            recipients,
-          });
-        }
-      } catch { /* non-fatal */ }
-
-      res.status(201).json(quiz);
+      // NOTE: No notifications here. We notify on publish (see publish route).
+      return res.status(201).json(quiz);
     } catch (err) {
       next(err);
     }
   }
 );
 
-// ─── Optional: list all quizzes for a course ───────────
+/* ─── 2) List quizzes for a course ─────────────────────────────
+   Students see only published quizzes; teachers/admins see all. */
 QuizRouter.get(
   "/course/:courseInstanceId",
   authmiddleware,
-  authorizedRole("student", "teacher", "admin"),
+  authorizedRole("student", "teacher", "admin", "superadmin"),
   param("courseInstanceId").isMongoId(),
   validate,
   async (req, res, next) => {
     try {
-      const qs = await QuizQuestion.find({ courseInstance: req.params.courseInstanceId })
-        .select("title description dueDate published questions postedBy topic createdAt updatedAt")
+      const baseFilter = { courseInstance: req.params.courseInstanceId };
+      const filter =
+        req.user.role === "student" ? { ...baseFilter, published: true } : baseFilter;
+
+      const qs = await QuizQuestion.find(filter)
+        .select(
+          "title description dueDate published publishedAt questions postedBy topic createdAt updatedAt"
+        )
         .populate("postedBy", "username role _id")
         .populate("topic", "title _id")
         .lean();
 
-      const items = qs.map(q => ({
+      const items = qs.map((q) => ({
         _id: q._id,
         type: "quiz",
         title: q.title,
@@ -102,6 +87,7 @@ QuizRouter.get(
         description: q.description || "",
         questionCount: (q.questions || []).length,
         published: !!q.published,
+        publishedAt: q.publishedAt || null,
         dueAt: q.dueDate || null,
         postedBy: q.postedBy,
         topic: q.topic,
@@ -116,7 +102,8 @@ QuizRouter.get(
   }
 );
 
-// ─── 2) Fetch a quiz ──────────────────────
+/* ─── 3) Fetch a quiz by ID ────────────────────────────────────
+   Students may not open drafts. */
 QuizRouter.get(
   "/:quizId",
   authmiddleware,
@@ -126,6 +113,10 @@ QuizRouter.get(
     try {
       const quiz = await QuizQuestion.findById(req.params.quizId);
       if (!quiz) return res.status(404).json({ message: "Quiz not found" });
+
+      if (req.user.role === "student" && !quiz.published) {
+        return res.status(403).json({ message: "Quiz is not published" });
+      }
       res.json(quiz);
     } catch (err) {
       next(err);
@@ -133,7 +124,7 @@ QuizRouter.get(
   }
 );
 
-// ─── 3) Update quiz metadata ──────────────
+/* ─── 4) Update quiz metadata (title/description/dueDate) ───── */
 QuizRouter.patch(
   "/:quizId",
   authmiddleware,
@@ -163,7 +154,8 @@ QuizRouter.patch(
   }
 );
 
-// ─── 4) Publish / Unpublish ───────────────
+/* ─── 5) Publish / Unpublish ───────────────────────────────────
+   Sends notifications when transitioning from draft -> published. */
 QuizRouter.patch(
   "/:quizId/publish",
   authmiddleware,
@@ -172,12 +164,41 @@ QuizRouter.patch(
   validate,
   async (req, res, next) => {
     try {
-      const quiz = await QuizQuestion.findByIdAndUpdate(
-        req.params.quizId,
-        { published: req.body.published },
-        { new: true }
-      );
+      const quiz = await QuizQuestion.findById(req.params.quizId);
       if (!quiz) return res.status(404).json({ message: "Quiz not found" });
+
+      const wasPublished = !!quiz.published;
+      quiz.published = !!req.body.published;
+      quiz.publishedAt = quiz.published ? new Date() : undefined;
+      await quiz.save();
+
+      // Notify only on the transition to published
+      if (!wasPublished && quiz.published) {
+        try {
+          const courseInstance = await CourseInstance.findById(quiz.courseInstance);
+          if (courseInstance) {
+            const students = await User.find({
+              role: "student",
+              batch: courseInstance.batch,
+            }).select("_id");
+            const recipients = students.map((s) => String(s._id));
+            if (recipients.length) {
+              await notificationModel.create({
+                courseInstance: quiz.courseInstance,
+                type: "quiz",
+                refId: quiz._id,
+                title: quiz.title,
+                message: `New quiz published: ${quiz.title}`,
+                createdBy: req.user._id,
+                recipients,
+              });
+            }
+          }
+        } catch {
+          /* non-fatal notify */
+        }
+      }
+
       res.json(quiz);
     } catch (err) {
       next(err);
@@ -185,7 +206,7 @@ QuizRouter.patch(
   }
 );
 
-// ─── 5) Add MCQ ───────────────────────────
+/* ─── 6) Add MCQ question ───────────────────────────────────── */
 QuizRouter.post(
   "/:quizId/questions",
   authmiddleware,
@@ -210,7 +231,7 @@ QuizRouter.post(
         text: req.body.text,
         type: "mcq",
         points: req.body.points,
-        options: req.body.options,
+        options: req.body.options, // [{text}]
         feedbackCorrect: req.body.feedbackCorrect,
         feedbackIncorrect: req.body.feedbackIncorrect,
       });
@@ -223,7 +244,7 @@ QuizRouter.post(
   }
 );
 
-// ─── 6) Update a question ──────────────────
+/* ─── 7) Update a question (strict after publish/submissions) ─ */
 QuizRouter.patch(
   "/:quizId/questions/:questionId",
   authmiddleware,
@@ -235,7 +256,7 @@ QuizRouter.patch(
     body("points").optional().isInt({ min: 0 }),
     body("feedbackCorrect").optional().isString(),
     body("feedbackIncorrect").optional().isString(),
-    body("correctOption").optional().isMongoId(),
+    body("correctOption").optional().isMongoId(), // must be an existing option _id
     body("options").optional().isArray({ min: 2 }),
     body("options.*.text").optional().isString().notEmpty(),
     body("options.*._id").optional().isMongoId(),
@@ -244,7 +265,14 @@ QuizRouter.patch(
   async (req, res, next) => {
     try {
       const { quizId, questionId } = req.params;
-      const { text, points, feedbackCorrect, feedbackIncorrect, options, correctOption } = req.body;
+      const {
+        text,
+        points,
+        feedbackCorrect,
+        feedbackIncorrect,
+        options,
+        correctOption,
+      } = req.body;
 
       const quiz = await QuizQuestion.findById(quizId);
       if (!quiz) return res.status(404).json({ message: "Quiz not found" });
@@ -262,46 +290,57 @@ QuizRouter.patch(
 
       if (Array.isArray(options)) {
         if (isPublished || hasSubs) {
-          // strict: update text only
+          // Strict mode: update text only; no add/remove/reorder
           if (options.length !== q.options.length) {
             return res.status(400).json({
-              message: "Cannot add/remove options after publish or once submissions exist.",
+              message:
+                "Cannot add/remove options after publish or once submissions exist.",
             });
           }
           const existingIds = new Set(q.options.map((o) => String(o._id)));
           for (const incoming of options) {
             if (!incoming._id || !existingIds.has(String(incoming._id))) {
               return res.status(400).json({
-                message: "All provided options must include existing _id in strict mode.",
+                message:
+                  "All provided options must include existing _id in strict mode.",
               });
             }
           }
-          const byId = new Map(options.map((o) => [String(o._id), o.text]));
+          const byIdText = new Map(options.map((o) => [String(o._id), o.text]));
           q.options.forEach((opt) => {
-            const newText = byId.get(String(opt._id));
+            const newText = byIdText.get(String(opt._id));
             if (typeof newText === "string") opt.text = newText;
           });
         } else {
-          // flexible: replace array
-          const existingMap = new Map(q.options.map((o) => [String(o._id), o]));
+          // Flexible mode: you may replace the whole array
+          const currentMap = new Map(q.options.map((o) => [String(o._id), o]));
           q.options = options.map((o) => {
-            if (o._id && existingMap.has(String(o._id))) {
-              return { _id: existingMap.get(String(o._id))._id, text: o.text };
+            if (o._id && currentMap.has(String(o._id))) {
+              return { _id: currentMap.get(String(o._id))._id, text: o.text };
             }
             return { text: o.text };
           });
-          if (q.correctOption && !q.options.some((o) => String(o._id) === String(q.correctOption))) {
+
+          // If the previous correctOption is no longer present, clear it
+          if (
+            q.correctOption &&
+            !q.options.some((o) => String(o._id) === String(q.correctOption))
+          ) {
             q.correctOption = undefined;
           }
         }
       }
 
       if (typeof correctOption === "string") {
-        const exists = q.options.some((o) => String(o._id) === String(correctOption));
+        const exists = q.options.some(
+          (o) => String(o._id) === String(correctOption)
+        );
         if (!exists) {
-          return res.status(400).json({ message: "correctOption must be one of the current option IDs." });
+          return res
+            .status(400)
+            .json({ message: "correctOption must be one of the current option IDs." });
         }
-        q.correctOption = correctOption;
+        q.correctOption = correctOption; // stored as ObjectId
       }
 
       await quiz.save();
@@ -313,7 +352,7 @@ QuizRouter.patch(
   }
 );
 
-// ─── 9) Delete a quiz ──────────────────────
+/* ─── 8) Delete a quiz ──────────────────────────────────────── */
 QuizRouter.delete(
   "/:quizId",
   authmiddleware,
@@ -335,7 +374,7 @@ QuizRouter.delete(
   }
 );
 
-// ─── 10) Delete a single question ──────────
+/* ─── 9) Delete a question ───────────────────────────────────── */
 QuizRouter.delete(
   "/:quizId/questions/:questionId",
   authmiddleware,
