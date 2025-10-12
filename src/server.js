@@ -58,6 +58,7 @@ import replyRoutes from './functions/announcement-reply-routes.js';
 import ResultRouter from './result/result-routes.js';
 import Calender from './calender.js';
 import leaveRouter from './functions/leave_routes.js';
+import adminRoute from './admin/admin_routes.js';
 
 // ====== Connect DB ======
 await connectDB();
@@ -182,7 +183,7 @@ app.use("/calendacourseinstancesr", Calender);
 app.use('/leave',leaveRouter);
 // Attendance router
 app.use('/attendance', AttendanceRouter);
-
+app.use ('/admin-api', adminRoute);
 // Health check
 app.get('/health', (_req, res) => res.json({ ok: true }));
 
