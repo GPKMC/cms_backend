@@ -4,7 +4,7 @@ import { authmiddleware, authorizedRole } from "../../users/user-middleware.js";
 
 // ⬇️ Adjust these two import paths if your folder layout differs
 import TeacherAvailability from "./teacher-availability.js";
-import ScheduleEvent from "./schedule-event.js";
+import ScheduleEvent from "./schedule-event-model.js";
 
 const teacherAvailabilityRouter = express.Router();
 const User = () => mongoose.model("User");

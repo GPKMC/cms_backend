@@ -1,7 +1,7 @@
 // routes/schedule-events.routes.js
 import express from "express";
 import mongoose from "mongoose";
-import ScheduleEvent, { hhmmToMinutes } from "./schedule-event.js";
+import ScheduleEvent, { hhmmToMinutes } from "./schedule-event-model.js";
 import { authmiddleware, authorizedRole } from "../../users/user-middleware.js";
 
 const scheduleRouter = express.Router();

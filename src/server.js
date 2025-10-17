@@ -59,6 +59,8 @@ import ResultRouter from './result/result-routes.js';
 import Calender from './calender.js';
 import leaveRouter from './functions/leave_routes.js';
 import adminRoute from './admin/admin_routes.js';
+import teacherSchedule from './functions/schedule/teacher-schedule-routes.js';
+import studentSchedule from './functions/schedule/student-schedule.js';
 
 // ====== Connect DB ======
 await connectDB();
@@ -184,6 +186,8 @@ app.use('/leave',leaveRouter);
 // Attendance router
 app.use('/attendance', AttendanceRouter);
 app.use ('/admin-api', adminRoute);
+app.use('/teacherSchedule', teacherSchedule);
+app.use('/studentSchedule', studentSchedule);
 // Health check
 app.get('/health', (_req, res) => res.json({ ok: true }));
 

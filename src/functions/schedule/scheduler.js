@@ -1,6 +1,6 @@
 // services/scheduler.js
 import mongoose from "mongoose";
-import ScheduleEvent from "./schedule-event.js";
+import ScheduleEvent from "./schedule-event-model.js";
 import TeacherAvailability from "./teacher-availability.js";
 
 const CI = () => mongoose.model("CourseInstance");
