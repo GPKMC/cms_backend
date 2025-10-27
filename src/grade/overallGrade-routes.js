@@ -487,5 +487,171 @@ GradesRouter.patch(
     }
   }
 );
+// --- STUDENT: list my grades for each assignment in a course ---
+GradesRouter.get(
+  "/courseInstance/:id/my/assignments",
+  authmiddleware,
+  authorizedRole("student", "teacher", "admin", "superadmin"),
+  async (req, res) => {
+    try {
+      const courseInstanceId = asId(req.params.id);
+      const me = req.user?._id ? String(req.user._id) : null;
+      if (!me) return res.status(401).json({ error: "Unauthorized" });
+
+      // 1) All assignments in this course
+      const assignments = await assignmentModel
+        .find({ courseInstance: courseInstanceId })
+        .select("_id title points dueDate closeAt topic visibleTo")
+        .lean();
+
+      // 2) Filter to only those visible to me
+      const isEligible = (a) => {
+        const vt = Array.isArray(a.visibleTo) ? a.visibleTo.map(String) : [];
+        // If visibleTo not set/empty => visible to all
+        return vt.length === 0 || vt.includes(me);
+      };
+      const visibleAssignments = assignments.filter(isEligible);
+
+      // 3) Load my submissions for the visible assignments
+      const aIds = visibleAssignments.map((a) => a._id);
+      const mySubs = aIds.length
+        ? await AssignmentSubmissionModel.find({
+            assignment: { $in: aIds },
+            student: asId(me),
+          })
+            .select("_id assignment grade feedback submittedAt status")
+            .lean()
+        : [];
+
+      const subByAssign = new Map(
+        mySubs.map((s) => [String(s.assignment), s])
+      );
+
+      // 4) Build row for each assignment
+      const rows = visibleAssignments.map((a) => {
+        const id = String(a._id);
+        const maxPoints = Number.isFinite(a.points) ? a.points : 0;
+        const sub = subByAssign.get(id) || null;
+        const rawScore =
+          sub && Number.isFinite(sub.grade) ? Number(sub.grade) : null;
+
+        const status = deriveStatus({
+          exists: Boolean(sub),
+          score: rawScore,
+        });
+
+        return {
+          assignmentId: id,
+          title: a.title ?? "Assignment",
+          topic: a.topic ?? null,
+          dueAt: a.dueDate ?? a.closeAt ?? null,
+          maxPoints,
+          my: {
+            score: rawScore,                             // e.g., 18
+            percentage:
+              rawScore != null && maxPoints > 0
+                ? (rawScore / maxPoints) * 100
+                : null,                                   // e.g., 90
+            status,                                       // "graded" | "submitted" | "missing"
+            gradedAt: sub?.submittedAt ?? null,           // reuse submittedAt; add gradedAt if you track it
+            feedback: sub?.feedback ?? null,
+          },
+        };
+      });
+
+      // Optional: sort by due date ascending
+      rows.sort((a, b) => {
+        const da = a.dueAt ? new Date(a.dueAt).getTime() : 0;
+        const db = b.dueAt ? new Date(b.dueAt).getTime() : 0;
+        return da - db;
+      });
+
+      return res.json({
+        courseInstanceId: String(courseInstanceId),
+        items: rows,
+        summary: {
+          earned: rows.reduce(
+            (s, r) => s + (Number.isFinite(r.my.score) ? r.my.score : 0),
+            0
+          ),
+          possible: rows.reduce((s, r) => s + (r.maxPoints || 0), 0),
+        },
+        policies: { scheme: "points", treatMissingAsZero: false },
+      });
+    } catch (err) {
+      console.error("student assignments view error:", err);
+      res.status(500).json({ error: err.message || "Server error" });
+    }
+  }
+);
+
+// --- STUDENT: get my grade for a single assignment ---
+GradesRouter.get(
+  "/assignment/:assignmentId/my",
+  authmiddleware,
+  authorizedRole("student", "teacher", "admin", "superadmin"),
+  async (req, res) => {
+    try {
+      const me = req.user?._id ? String(req.user._id) : null;
+      if (!me) return res.status(401).json({ error: "Unauthorized" });
+
+      const assignment = await assignmentModel
+        .findById(asId(req.params.assignmentId))
+        .select("_id title points dueDate closeAt topic visibleTo courseInstance")
+        .lean();
+
+      if (!assignment) {
+        return res.status(404).json({ error: "Assignment not found" });
+      }
+
+      // Visibility check
+      const vt = Array.isArray(assignment.visibleTo)
+        ? assignment.visibleTo.map(String)
+        : [];
+      const eligible = vt.length === 0 || vt.includes(me);
+      if (!eligible) {
+        return res.status(403).json({ error: "Not eligible for this assignment" });
+      }
+
+      // My submission (if any)
+      const sub = await AssignmentSubmissionModel.findOne({
+        assignment: assignment._id,
+        student: asId(me),
+      })
+        .select("_id assignment grade feedback submittedAt status")
+        .lean();
+
+      const maxPoints = Number.isFinite(assignment.points) ? assignment.points : 0;
+      const rawScore =
+        sub && Number.isFinite(sub.grade) ? Number(sub.grade) : null;
+
+      const status = deriveStatus({
+        exists: Boolean(sub),
+        score: rawScore,
+      });
+
+      return res.json({
+        assignmentId: String(assignment._id),
+        title: assignment.title ?? "Assignment",
+        topic: assignment.topic ?? null,
+        dueAt: assignment.dueDate ?? assignment.closeAt ?? null,
+        maxPoints,
+        my: {
+          score: rawScore,
+          percentage:
+            rawScore != null && maxPoints > 0
+              ? (rawScore / maxPoints) * 100
+              : null,
+          status,                              // "graded" | "submitted" | "missing"
+          gradedAt: sub?.submittedAt ?? null,  // use gradedAt if you store it
+          feedback: sub?.feedback ?? null,
+        },
+      });
+    } catch (err) {
+      console.error("single assignment (my) error:", err);
+      res.status(500).json({ error: err.message || "Server error" });
+    }
+  }
+);
 
 export default GradesRouter;
