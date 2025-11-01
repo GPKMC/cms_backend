@@ -7,7 +7,7 @@ import User from "../users/user-model.js";
 import assignmentModel from "../assignment/assignmentModel.js";
 import groupAssignmentModel from "../assignment/groupAssignment-model.js";
 import questionModel from "../question/question-model.js";
-import AssignmentSubmissionModel from "../assignment/AssignmentSubmission-model.js";
+import AssignmentSubmissionModel from "../assignment/assignmentSubmission-model.js";
 import questionSubmissionModel from "../question/questionSubmission-model.js";
 import groupSubmissionModel from "../assignment/groupSubmission-model.js";
 
