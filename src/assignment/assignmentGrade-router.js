@@ -2,7 +2,7 @@
 import express from "express";
 import { authmiddleware, authorizedRole } from "../users/user-middleware.js";
 import Assignment from "../assignment/assignmentModel.js"; // <-- path to your Assignment model
-import Submission from "../assignment/AssignmentSubmission-model.js"; // <-- path to your Submission model
+import Submission from "../assignment/assignmentSubmission-model.js"; // <-- path to your Submission model
 import User from "../users/user-model.js";
 
 const assignmentGradeRouter = express.Router();
