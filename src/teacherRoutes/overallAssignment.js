@@ -13,7 +13,7 @@ import questionModel from "../question/question-model.js";
 import quizquestionModel from "../quizQuestion/quizquestion-model.js";
 
 // Submission models
-import AssignmentSubmission from "../assignment/AssignmentSubmission-model.js";
+import AssignmentSubmission from "../assignment/assignmentSubmission-model.js";
 import GroupAssignmentSubmission from "../assignment/groupSubmission-model.js";
 import QuestionSubmission from "../question/questionSubmission-model.js";
 import QuizSubmission from "../quizQuestion/submission-model.js";

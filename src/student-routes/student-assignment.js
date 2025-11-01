@@ -9,7 +9,7 @@ import groupAssignmentModel from "../assignment/groupAssignment-model.js";
 import quizquestionModel from "../quizQuestion/quizquestion-model.js";
 import questionModel from "../question/question-model.js";
 
-import AssignmentSubmissionModel from "../assignment/AssignmentSubmission-model.js";
+import AssignmentSubmissionModel from "../assignment/assignmentSubmission-model.js";
 import questionSubmissionModel from "../question/questionSubmission-model.js";
 import groupSubmissionModel from "../assignment/groupSubmission-model.js";
 import QuizSubmission from "../quizQuestion/submission-model.js";
