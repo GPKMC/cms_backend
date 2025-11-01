@@ -1,7 +1,7 @@
 import express from 'express';
 import { HfInference } from '@huggingface/inference';
-import AssignmentSubmissionModel from './AssignmentSubmission-model.js';
 import Reference from '../plagiarism/websiteRef-model.js';
+import AssignmentSubmissionModel from './assignmentSubmission-model.js';
 import questionSubmissionModel from '../question/questionSubmission-model.js';
 import { authmiddleware, authorizedRole } from '../users/user-middleware.js';
 import multer from 'multer';
