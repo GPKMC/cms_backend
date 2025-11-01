@@ -5,7 +5,7 @@ import { authmiddleware, authorizedRole } from '../users/user-middleware.js';
 import { cosineSimilarity } from '../utils/cosine-similarity.js';
 import dotenv from 'dotenv';
 import questionSubmissionModel from './questionSubmission-model.js';
-import AssignmentSubmissionModel from '../assignment/AssignmentSubmission-model.js';
+import AssignmentSubmissionModel from '../assignment/assignmentSubmission-model.js';
 import groupSubmissionModel from '../assignment/groupSubmission-model.js';
 import Reference from "../plagiarism/websiteRef-model.js";
 dotenv.config();
