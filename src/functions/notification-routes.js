@@ -16,8 +16,7 @@ import groupAssignmentModel from "../assignment/groupAssignment-model.js";
 // NOTE: ensure this import path matches your schema filename
 import groupSubmissionModel from "../assignment/groupSubmission-model.js"; 
 import questionSubmissionModel from "../question/questionSubmission-model.js";
-import AssignmentSubmissionModel from "../assignment/AssignmentSubmission-model.js";
-
+import AssignmentSubmissionModel from "../assignment/assignmentSubmission-model.js";
 const NotificationRouter = express.Router();
 
 /**
