@@ -16,30 +16,30 @@ const courseInstanceSchema = new mongoose.Schema({
     ref: 'User',
     required: true,
   },
-  materials: [{
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'Material',
-  }],
-  assignments: [{
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'Assignment',
-  }],
-  questions: [{
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'Question',
-  }],
-  quiz: [{
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'Quiz',  
-  }],
-  attendanceRecords: [{
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'Attendance',
-  }],
-  grades: [{
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'Grade',
-  }],
+  // materials: [{
+  //   type: mongoose.Schema.Types.ObjectId,
+  //   ref: 'Material',
+  // }],
+  // assignments: [{
+  //   type: mongoose.Schema.Types.ObjectId,
+  //   ref: 'Assignment',
+  // }],
+  // questions: [{
+  //   type: mongoose.Schema.Types.ObjectId,
+  //   ref: 'Question',
+  // }],
+  // quiz: [{
+  //   type: mongoose.Schema.Types.ObjectId,
+  //   ref: 'Quiz',  
+  // }],
+  // attendanceRecords: [{
+  //   type: mongoose.Schema.Types.ObjectId,
+  //   ref: 'Attendance',
+  // }],
+  // grades: [{
+  //   type: mongoose.Schema.Types.ObjectId,
+  //   ref: 'Grade',
+  // }],
     isActive: { type: Boolean, 
         // default: true 
     },
