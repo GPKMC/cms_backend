@@ -1,11 +1,14 @@
 import mammoth from "mammoth";
-import pdfParse from "pdf-parse";
+import { createRequire } from "module";
 import textract from "textract";
 import Tesseract from "tesseract.js";
 import fs from "fs-extra";
 import path from "path";
 import { execSync } from "child_process";
 import spliddit from "spliddit"; // NEW: Robust word segmenter
+
+const require = createRequire(import.meta.url);
+const pdfParse = require("pdf-parse");
 
 // ---- TEXT NORMALIZATION ----
 function cleanText(text) {
