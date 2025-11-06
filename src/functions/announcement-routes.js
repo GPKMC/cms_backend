@@ -185,12 +185,16 @@ announcementRoutes.post(
       const relFromUploads = f.path.startsWith(uploadsRoot)
         ? f.path.substring(uploadsRoot.length)
         : path.relative(path.join(process.cwd(), "uploads"), f.path);
+
+      // ❌ This is the problem:
       const url = `${req.protocol}://${req.get("host")}/uploads/${relFromUploads.replace(/\\/g, "/")}`;
+
       return { url, originalname: f.originalname, filetype: f.mimetype, size: f.size };
     });
     res.json({ files });
   }
 );
+
 
 // Multer error handler
 announcementRoutes.use((err, req, res, next) => {
