@@ -27,6 +27,41 @@ function utcMonthRange(year, month1to12) {
   return { start, end };
 }
 
+// 🔍 Normalize QR contents into a bare JWT (handles URL, JSON, Bearer, etc.)
+function extractJwtToken(raw) {
+  if (!raw) return null;
+  let str = String(raw).trim();
+
+  // Case 1: JSON string like {"token":"..."}
+  try {
+    const obj = JSON.parse(str);
+    if (obj && typeof obj === "object" && obj.token) {
+      str = String(obj.token);
+    }
+  } catch {
+    // not JSON, ignore
+  }
+
+  // Case 2: full URL with ?token=...
+  try {
+    if (str.startsWith("http://") || str.startsWith("https://")) {
+      const url = new URL(str);
+      const qToken = url.searchParams.get("token");
+      if (qToken) str = qToken;
+    }
+  } catch {
+    // not a valid URL, ignore
+  }
+
+  // Case 3: "Bearer <jwt>"
+  str = str.replace(/^Bearer\s+/i, "");
+
+  // Basic sanity check for JWT shape
+  if (str.split(".").length !== 3) return null;
+
+  return str;
+}
+
 /* ------------------------- open session ------------------------- */
 /**
  * POST /attendance/sessions
@@ -39,7 +74,7 @@ function utcMonthRange(year, month1to12) {
  *   {
  *     courseInstanceId: string,
  *     rotating?: boolean,         // default true for live
- *     forDate?: "YYYY-MM-DD",     // optional: create/reuse a session on this date (UTC)
+ *     forDate?: "YYYY-MM-DD",     // optional: create/reuse a session on that date (UTC)
  *     reuse?: boolean             // default true: if a session exists that day, return it
  *   }
  */
@@ -373,13 +408,23 @@ AttendanceRouter.post(
   authorizedRole("student"), // only students scan
   async (req, res) => {
     try {
-      const { token } = req.body;
-      if (!token) return res.status(400).json({ error: "token required" });
+      const raw = req.body.token;
+      if (!raw) {
+        return res.status(400).json({ error: "token required" });
+      }
+
+      // 🔍 Normalize whatever came from the QR to a bare JWT
+      const token = extractJwtToken(raw);
+      if (!token) {
+        return res.status(400).json({ error: "invalid token" });
+      }
 
       // Decode to get sid, then verify with per-session secret
       const decodedLoose = jwt.decode(token);
       const sid = decodedLoose?.sid;
-      if (!sid) return res.status(400).json({ error: "invalid token" });
+      if (!sid) {
+        return res.status(400).json({ error: "invalid token" });
+      }
 
       const session = await AttendanceSession.findById(sid);
       if (!session || session.isClosed) {
@@ -395,8 +440,16 @@ AttendanceRouter.post(
       // Optional: ensure student belongs to this CI's batch
       const ci = await CourseInstance.findById(session.courseInstance).select("batch");
       if (!ci) return res.status(404).json({ error: "CourseInstance not found" });
-      const count = await User.countDocuments({ _id: req.user._id, role: "student", batch: ci.batch });
-      if (!count) return res.status(403).json({ error: "Not in this batch" });
+
+      const count = await User.countDocuments({
+        _id: req.user._id,
+        role: "student",
+        batch: ci.batch,
+      });
+
+      if (!count) {
+        return res.status(403).json({ error: "Not in this batch" });
+      }
 
       const record = await AttendanceRecord.findOneAndUpdate(
         { session: session._id, student: req.user._id },

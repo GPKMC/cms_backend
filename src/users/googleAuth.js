@@ -110,8 +110,8 @@ const googleAuthRouter = express.Router();
 const {
   GOOGLE_CLIENT_ID,
   GOOGLE_CLIENT_SECRET,
-  SERVER_URL = 'http://localhost:5000',
-  CLIENT_URL = 'http://localhost:3000',
+  SERVER_URL ,
+  CLIENT_URL,
 } = process.env;
 
 const GOOGLE_CALLBACK_URL = `${SERVER_URL}/api/auth/google/callback`;

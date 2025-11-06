@@ -25,6 +25,9 @@ const UserSchema = new mongoose.Schema({
     ref: "Batch",
     required: function () { return this.role === "student"; },
   },
+
+    passwordResetCodeHash:   { type: String, default: null },
+    passwordResetExpiresAt:  { type: Date,   default: null },
 }, { timestamps: true });
 
 // One Google account ↔ one user (only when googleId is set)
