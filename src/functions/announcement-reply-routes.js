@@ -36,61 +36,21 @@ const upload = multer({
   limits: { fileSize: 25 * 1024 * 1024, files: 10 },
 });
 
-/* ========= Helpers (mirrors from announcementRoutes) ========= */
+/* ========= Helpers ========= */
 const isId = (id) => mongoose.Types.ObjectId.isValid(id);
 const now = () => new Date();
-const toBool = (v, d = false) => v === true || v === "true" || v === "1" || (v === undefined ? d : false);
+const toBool = (v, d = false) =>
+  v === true || v === "true" || v === "1" || (v === undefined ? d : false);
 
 /** Centralized author populate */
 const AUTHOR_POP = { path: "author", select: "username name role _id" };
 
-function collectBatchObjectIds(user) {
-  const raw = new Set();
-  if (user?.batch) raw.add(user.batch);
-  if (user?.batchId) raw.add(user.batchId);
-  if (Array.isArray(user?.batches)) user.batches.forEach((x) => raw.add(x));
-  if (Array.isArray(user?.batchIds)) user.batchIds.forEach((x) => raw.add(x));
-  if (user?.profile?.batch) raw.add(user.profile.batch);
-  if (Array.isArray(user?.profile?.batches)) user.profile.batches.forEach((x) => raw.add(x));
-  const ids = Array.from(raw).filter(isId);
-  return ids.map((x) => new mongoose.Types.ObjectId(x));
-}
+/** we no longer import / copy audienceFilter + visibility here */
 
-function audienceFilter(user) {
-  if (!user) return { $or: [{ audience: { $exists: false } }, { "audience.mode": "all" }] };
-  if (user.role === "admin") return {};
-  const ors = [{ audience: { $exists: false } }, { "audience.mode": "all" }];
-  if (user.role === "teacher") {
-    ors.push({
-      "audience.mode": "faculty",
-      $or: [
-        { "audience.facultyIds": { $exists: false } },
-        { "audience.facultyIds": { $size: 0 } },
-        { "audience.facultyIds": user._id },
-      ],
-    });
-  }
-  if (user.role === "student") {
-    const batchOids = collectBatchObjectIds(user);
-    if (batchOids.length) {
-      ors.push({ "audience.mode": "batches", "audience.batchIds": { $in: batchOids } });
-    }
-  }
-  return { $or: ors };
-}
-
-function visibility({ adminIncludeUnpublished = false } = {}) {
-  const n = now();
-  const base = { isDeleted: false };
-  if (adminIncludeUnpublished) return base;
-  return {
-    ...base,
-    published: true,
-    $and: [
-      { $or: [{ publishAt: null }, { publishAt: { $lte: n } }] },
-      { $or: [{ expiresAt: null }, { expiresAt: { $gt: n } }] },
-    ],
-  };
+/** Check only that announcement exists and is not soft-deleted */
+async function ensureAnnouncementExists(id) {
+  if (!isId(id)) return null;
+  return Announcement.exists({ _id: id, isDeleted: false });
 }
 
 // turn /uploads/... URL to absolute path so we can unlink on hard delete
@@ -148,15 +108,9 @@ replyRoutes.post(
       const { contentHtml = "", files = [], parent = null } = req.body || {};
       if (!isId(id)) return res.status(400).json({ error: "Invalid announcement id" });
 
-      // must be allowed to view the announcement to reply
-      const isAdmin = req.user?.role === "admin";
-      const adminView = isAdmin ? toBool(req.query.adminView, true) : false;
-      const ann = await Announcement.findOne({
-        _id: id,
-        ...visibility({ adminIncludeUnpublished: adminView }),
-        ...audienceFilter(req.user),
-      }).select("_id").lean();
-      if (!ann) return res.status(404).json({ error: "Announcement not found or not visible" });
+      // ✅ ONLY check that announcement exists (no visibility/audience filtering here)
+      const annExists = await ensureAnnouncementExists(id);
+      if (!annExists) return res.status(404).json({ error: "Announcement not found" });
 
       if (parent) {
         if (!isId(parent)) return res.status(400).json({ error: "Invalid parent id" });
@@ -198,21 +152,21 @@ replyRoutes.get(
       const { id } = req.params;
       if (!isId(id)) return res.status(400).json({ error: "Invalid announcement id" });
 
-      const isAdmin = req.user?.role === "admin";
-      const adminView = isAdmin ? toBool(req.query.adminView, true) : false;
-      const ann = await Announcement.findOne({
-        _id: id,
-        ...visibility({ adminIncludeUnpublished: adminView }),
-        ...audienceFilter(req.user),
-      }).select("_id").lean();
-      if (!ann) return res.status(404).json({ error: "Announcement not found or not visible" });
+      // ✅ Only ensure announcement exists (no visibility/audience filtering)
+      const annExists = await ensureAnnouncementExists(id);
+      if (!annExists) return res.status(404).json({ error: "Announcement not found" });
 
-      const parent = req.query.parent === "null" || req.query.parent === undefined ? null : String(req.query.parent);
+      const parent =
+        req.query.parent === "null" || req.query.parent === undefined
+          ? null
+          : String(req.query.parent);
       if (parent && !isId(parent)) return res.status(400).json({ error: "Invalid parent id" });
 
       const page = Math.max(1, Number(req.query.page || 1));
       const limit = Math.max(1, Math.min(100, Number(req.query.limit || 20)));
       const sortDir = String(req.query.sort || "desc").toLowerCase() === "asc" ? 1 : -1;
+
+      const isAdmin = req.user?.role === "admin";
       const includeDeleted = isAdmin && toBool(req.query.includeDeleted, false);
 
       const cond = {
@@ -376,19 +330,15 @@ replyRoutes.get(
         .lean();
       if (!parent) return res.status(404).json({ error: "Parent reply not found" });
 
-      // must be able to view the parent announcement to view children
-      const isAdmin = req.user?.role === "admin";
-      const adminView = isAdmin ? toBool(req.query.adminView, true) : false;
-      const ann = await Announcement.findOne({
-        _id: parent.announcement,
-        ...visibility({ adminIncludeUnpublished: adminView }),
-        ...audienceFilter(req.user),
-      }).select("_id").lean();
-      if (!ann) return res.status(404).json({ error: "Announcement not found or not visible" });
+      // ✅ We do NOT re-check visibility/audience; just ensure announcement exists
+      const annExists = await ensureAnnouncementExists(parent.announcement);
+      if (!annExists) return res.status(404).json({ error: "Announcement not found" });
 
       const page = Math.max(1, Number(req.query.page || 1));
       const limit = Math.max(1, Math.min(100, Number(req.query.limit || 20)));
       const sortDir = String(req.query.sort || "desc").toLowerCase() === "asc" ? 1 : -1;
+
+      const isAdmin = req.user?.role === "admin";
       const includeDeleted = isAdmin && toBool(req.query.includeDeleted, false);
 
       const cond = {
