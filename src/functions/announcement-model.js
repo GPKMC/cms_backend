@@ -78,7 +78,7 @@ AnnouncementSchema.path("audience").validate(function (aud) {
 // Role-specific link for announcements (list page).
 // If you have courseInstance-specific announcements, adjust to include it.
 function deepLinkForAnnouncement(audience /* 'student' | 'teacher' */, doc) {
-  const base = process.env.FRONTEND_URL || process.env.CLIENT_URL || "http://localhost:3000";
+  const base = process.env.CLIENT_URL || "http://localhost:3000";
   return audience === "student"
     ? `${base}/student/dashboard/announcements`
     : `${base}/teacher/dashboard/announcements`;

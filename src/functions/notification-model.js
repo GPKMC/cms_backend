@@ -76,7 +76,7 @@ function subjectFor(type) {
  *   Others:       /teacher/dashboard/class/{ci}/Details/{Slug}/{refId}
  */
 function deepLinkFor(doc, audience = "student") {
-  const base = process.env.FRONTEND_URL || process.env.CLIENT_URL || "http://localhost:3000";
+  const base = process.env.CLIENT_URL || "http://localhost:3000";
 
   if (audience === "student") {
     const ciPath = doc.courseInstance
