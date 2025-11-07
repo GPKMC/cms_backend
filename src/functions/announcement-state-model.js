@@ -14,5 +14,8 @@ const AnnouncementStateSchema = new Schema(
 
 AnnouncementStateSchema.index({ announcement: 1, user: 1 }, { unique: true });
 
-const AnnouncementState = mongoose.model("AnnouncementState", AnnouncementStateSchema);
+const AnnouncementState =
+  mongoose.models.AnnouncementState ||
+  mongoose.model("AnnouncementState", AnnouncementStateSchema);
+
 export default AnnouncementState;
