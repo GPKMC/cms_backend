@@ -206,22 +206,45 @@ gradingRouter.patch(
   async (req, res) => {
     try {
       const { id } = req.params;
-      const { accepting } = req.body ?? {};
-      const q = await questionModel
-        .findByIdAndUpdate(
-          id,
-          { $set: { acceptingSubmissions: !!accepting } },
-          { new: true }
-        )
-        .lean();
-      if (!q) return res.status(404).json({ error: "Question not found" });
-      res.json({ ok: true, acceptingSubmissions: q.acceptingSubmissions ?? true });
+      const { acceptingSubmissions, closeAt, closeNow } = req.body ?? {};
+
+      const q = await questionModel.findById(id);
+      if (!q) {
+        return res.status(404).json({ error: "Question not found" });
+      }
+
+      // toggle acceptingSubmissions directly if provided
+      if (typeof acceptingSubmissions === "boolean") {
+        q.acceptingSubmissions = acceptingSubmissions;
+      }
+
+      // close immediately
+      if (closeNow === true) {
+        q.acceptingSubmissions = false;
+        q.closeAt = new Date();
+      } else if (closeAt !== undefined) {
+        // allow null to clear, or ISO date string to set
+        q.closeAt = closeAt ? new Date(closeAt) : null;
+      }
+
+      await q.save();
+
+      return res.json({
+        ok: true,
+        question: {
+          _id: q._id,
+          title: q.title,
+          acceptingSubmissions: q.acceptingSubmissions,
+          closeAt: q.closeAt,
+        },
+      });
     } catch (e) {
       console.error(e);
       res.status(500).json({ error: "Internal server error" });
     }
   }
 );
+
 
 /* =========================================================
    POST /grading/question/:id/return   { submissionIds: string[] }
