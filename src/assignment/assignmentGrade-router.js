@@ -26,16 +26,25 @@ assignmentGradeRouter.patch(
         return res.status(404).json({ error: "Assignment not found." });
       }
 
-      if (typeof acceptingSubmissions === "boolean") {
-        assignment.acceptingSubmissions = acceptingSubmissions;
-      }
-
+      // 1) Close immediately
       if (closeNow === true) {
         assignment.acceptingSubmissions = false;
         assignment.closeAt = new Date();
-      } else if (closeAt !== undefined) {
-        // allow null to clear, or ISO date string to set
-        assignment.closeAt = closeAt ? new Date(closeAt) : null;
+      } else {
+        // 2) Explicit closeAt change (date or null to clear)
+        if (closeAt !== undefined) {
+          assignment.closeAt = closeAt ? new Date(closeAt) : null;
+        }
+
+        // 3) Toggle acceptingSubmissions
+        if (typeof acceptingSubmissions === "boolean") {
+          assignment.acceptingSubmissions = acceptingSubmissions;
+
+          // when reopening, clear any old closeAt so it no longer blocks
+          if (acceptingSubmissions) {
+            assignment.closeAt = null;
+          }
+        }
       }
 
       await assignment.save();
@@ -55,6 +64,7 @@ assignmentGradeRouter.patch(
     }
   }
 );
+
 
 /**
  * GET /teacher/assignments/:assignmentId/submissions

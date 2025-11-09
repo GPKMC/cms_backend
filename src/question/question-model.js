@@ -7,21 +7,29 @@ const QuestionSchema = new Schema({
   postedBy: { type: Schema.Types.ObjectId, ref: "User", required: true }, // Teacher
   courseInstance: { type: Schema.Types.ObjectId, ref: "CourseInstance", required: true },
   topic: { type: Schema.Types.ObjectId, ref: "Topic" },
- documents: [{
-  url: String,
-  originalname: String,
-}],
-media: [{
-  url: String,
-  originalname: String,
-}],    
+
+  documents: [{
+    url: String,
+    originalname: String,
+  }],
+  media: [{
+    url: String,
+    originalname: String,
+  }],
+
   links: [String],          // Any external links
   youtubeLinks: [String],   // YouTube embed links
   commentsDisabled: { type: Boolean, default: false },
   mutedStudents: [{ type: Schema.Types.ObjectId, ref: "User" }],
   visibleTo: [{ type: Schema.Types.ObjectId, ref: "User" }], // Restrict to users
+
   dueDate: { type: Date, required: true },
   points: { type: Number, default: 0 },
+
+  // 🔽 NEW FIELDS
+  acceptingSubmissions: { type: Boolean, default: true }, // optional but usually paired with closeAt
+  closeAt: { type: Date, default: null },                 // <-- your "close at" field
+
   createdAt: { type: Date, default: Date.now },
   updatedAt: { type: Date, default: Date.now }
 });
