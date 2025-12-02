@@ -29,12 +29,12 @@ const ymdInTZ = (d = new Date(), tz = TZ) =>
 const isPast = (ymd) => ymd < ymdInTZ();
 
 const TYPES = [
-  { id: "sick",      label: "Sick Leave",       defaultReason: "Feeling unwell; requesting rest for recovery." },
-  { id: "emergency", label: "Emergency Leave",  defaultReason: "Urgent personal emergency; requesting leave." },
-  { id: "function",  label: "Function/Program", defaultReason: "Attending an important function/program." },
-  { id: "puja",      label: "Puja/Worship",     defaultReason: "Observing a religious puja/ritual." },
-  { id: "personal",  label: "Personal Work",    defaultReason: "Personal work that requires my presence." },
-  { id: "other",     label: "Other",            defaultReason: "" },
+  { id: "sick", label: "Sick Leave", defaultReason: "Feeling unwell; requesting rest for recovery." },
+  { id: "emergency", label: "Emergency Leave", defaultReason: "Urgent personal emergency; requesting leave." },
+  { id: "function", label: "Function/Program", defaultReason: "Attending an important function/program." },
+  { id: "puja", label: "Puja/Worship", defaultReason: "Observing a religious puja/ritual." },
+  { id: "personal", label: "Personal Work", defaultReason: "Personal work that requires my presence." },
+  { id: "other", label: "Other", defaultReason: "" },
 ];
 
 const ADMIN_LEAVE_TO = (process.env.ADMIN_LEAVE_TO || process.env.MAIL_FROM || "")
@@ -79,8 +79,8 @@ function defaultHtml(role, type, data, status = "pending") {
     data.dayPart === "first_half"
       ? "First Half"
       : data.dayPart === "second_half"
-      ? "Second Half"
-      : "Full Day";
+        ? "Second Half"
+        : "Full Day";
   return wrapHtml(`
     <h2 style="margin:0 0 8px">Leave Request — ${who}</h2>
     <div style="display:inline-block;font-size:12px;padding:2px 8px;border-radius:999px;background:${badgeBg};color:${badgeColor};border:1px solid ${badgeColor}">${status.toUpperCase()}</div>
@@ -103,8 +103,8 @@ function defaultText(role, type, data, status = "pending") {
     data.dayPart === "first_half"
       ? "First Half"
       : data.dayPart === "second_half"
-      ? "Second Half"
-      : "Full Day";
+        ? "Second Half"
+        : "Full Day";
   const reason = mergeReason(type, data);
   return [
     `Leave Request — ${who} [${status.toUpperCase()}]`,
@@ -190,8 +190,8 @@ async function sendLeaveEmails({ role, type, status = "pending", data }) {
         status === "approved"
           ? `✅ Leave approved — ${subjectBase}`
           : status === "rejected"
-          ? `❌ Leave rejected — ${subjectBase}`
-          : subjectBase,
+            ? `❌ Leave rejected — ${subjectBase}`
+            : subjectBase,
     });
     const pv = getPreviewUrl(info);
     console.log(`[leave:mail][decision ${status}][${driver}] requester ->`, routed.to || routed.bcc, pv || info.messageId);
@@ -518,7 +518,7 @@ leaveRouter.patch(
       doc.approvedAt = new Date();
       await doc.save();
 
-      const merged = mergeReason(doc.type, { reason: doc.reason });
+      const merged = mergeReason(doc.type, { reason: doc.reason || "" });
       const data = {
         id: String(doc._id),
         name: doc.user?.username || "User",
@@ -529,7 +529,7 @@ leaveRouter.patch(
         reason: merged,
         customMessage: merged,
       };
-      await sendLeaveEmails({ role: doc.role, type: doc.type, status: "approved", data });
+      await sendLeaveEmails({ role: doc.user?.role, type: doc.type, status: "approved", data });
 
       res.json({ ok: true, leave: doc });
     } catch (e) {
@@ -557,7 +557,10 @@ leaveRouter.patch(
       doc.approvedAt = new Date();
       await doc.save();
 
-      const merged = mergeReason(doc.type, { reason: doc.reason, rejectionReason: reason });
+      const merged = mergeReason(doc.type, {
+        reason: doc.reason || "",
+        rejectionReason: reason
+      });
       const data = {
         id: String(doc._id),
         name: doc.user?.username || "User",
@@ -568,7 +571,7 @@ leaveRouter.patch(
         reason: merged,
         customMessage: merged,
       };
-      await sendLeaveEmails({ role: doc.role, type: doc.type, status: "rejected", data });
+      await sendLeaveEmails({ role: doc.user?.role, type: doc.type, status: "rejected", data });
 
       res.json({ ok: true, leave: doc });
     } catch (e) {
