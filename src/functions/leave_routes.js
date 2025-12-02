@@ -232,12 +232,19 @@ leaveRouter.post(
         customSubject = "",
       } = req.body || {};
 
-      if (!type || !TYPES.some((t) => t.id === String(type))) return res.status(400).json({ error: "Invalid leave type" });
-      if (!["full", "first_half", "second_half"].includes(dayPart)) return res.status(400).json({ error: "Invalid dayPart" });
-      if (!leaveDate || typeof leaveDate !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(leaveDate)) return res.status(400).json({ error: "leaveDate must be 'YYYY-MM-DD'" });
+      if (!type || !TYPES.some((t) => t.id === String(type)))
+        return res.status(400).json({ error: "Invalid leave type" });
+      if (!["full", "first_half", "second_half"].includes(dayPart))
+        return res.status(400).json({ error: "Invalid dayPart" });
+      if (!leaveDate || typeof leaveDate !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(leaveDate))
+        return res.status(400).json({ error: "leaveDate must be 'YYYY-MM-DD'" });
       if (isPast(leaveDate)) return res.status(400).json({ error: "Cannot request leave for past dates" });
 
-      const dup = await LeaveRequest.findOne({ user: userId, leaveDate, status: { $in: ["pending", "approved"] } }).lean();
+      const dup = await LeaveRequest.findOne({
+        user: userId,
+        leaveDate,
+        status: { $in: ["pending", "approved"] },
+      }).lean();
       if (dup) return res.status(409).json({ error: "Leave already requested/approved for this date" });
 
       const me = await User.findById(userId).select("username email").lean();
@@ -249,7 +256,7 @@ leaveRouter.post(
         leaveDate,
         type,
         dayPart,
-        reason: mergedReason, // store merged
+        reason: mergedReason,
         status: "pending",
       });
 
@@ -265,13 +272,20 @@ leaveRouter.post(
         subject: customSubject || undefined,
       };
 
-      await sendLeaveEmails({ role: "teacher", type, status: "pending", data });
+      // ✅ Send email fail-safe
+      try {
+        await sendLeaveEmails({ role: "teacher", type, status: "pending", data });
+      } catch (err) {
+        console.error("Leave email failed:", err.message);
+      }
+
       res.status(201).json({ ok: true, leave: doc });
     } catch (e) {
       res.status(500).json({ error: e.message });
     }
   }
 );
+
 
 leaveRouter.get(
   "/teacher/mine",
@@ -342,12 +356,19 @@ leaveRouter.post(
         customSubject = "",
       } = req.body || {};
 
-      if (!type || !TYPES.some((t) => t.id === String(type))) return res.status(400).json({ error: "Invalid leave type" });
-      if (!["full", "first_half", "second_half"].includes(dayPart)) return res.status(400).json({ error: "Invalid dayPart" });
-      if (!leaveDate || typeof leaveDate !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(leaveDate)) return res.status(400).json({ error: "leaveDate must be 'YYYY-MM-DD'" });
+      if (!type || !TYPES.some((t) => t.id === String(type)))
+        return res.status(400).json({ error: "Invalid leave type" });
+      if (!["full", "first_half", "second_half"].includes(dayPart))
+        return res.status(400).json({ error: "Invalid dayPart" });
+      if (!leaveDate || typeof leaveDate !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(leaveDate))
+        return res.status(400).json({ error: "leaveDate must be 'YYYY-MM-DD'" });
       if (isPast(leaveDate)) return res.status(400).json({ error: "Cannot request leave for past dates" });
 
-      const dup = await LeaveRequest.findOne({ user: userId, leaveDate, status: { $in: ["pending", "approved"] } }).lean();
+      const dup = await LeaveRequest.findOne({
+        user: userId,
+        leaveDate,
+        status: { $in: ["pending", "approved"] },
+      }).lean();
       if (dup) return res.status(409).json({ error: "Leave already requested/approved for this date" });
 
       const me = await User.findById(userId).select("username email").lean();
@@ -359,7 +380,7 @@ leaveRouter.post(
         leaveDate,
         type,
         dayPart,
-        reason: mergedReason, // store merged
+        reason: mergedReason,
         status: "pending",
       });
 
@@ -375,13 +396,20 @@ leaveRouter.post(
         subject: customSubject || undefined,
       };
 
-      await sendLeaveEmails({ role: "student", type, status: "pending", data });
+      // ✅ Send email fail-safe
+      try {
+        await sendLeaveEmails({ role: "student", type, status: "pending", data });
+      } catch (err) {
+        console.error("Leave email failed:", err.message);
+      }
+
       res.status(201).json({ ok: true, leave: doc });
     } catch (e) {
       res.status(500).json({ error: e.message });
     }
   }
 );
+
 
 leaveRouter.get(
   "/student/mine",
