@@ -1,6 +1,6 @@
 // src/utils/mailer.js
 import nodemailer from "nodemailer";
-
+import Mailjet from "node-mailjet";
 let cachedTransporter = null;
 let cachedDriver = null;
 
@@ -91,6 +91,49 @@ export async function getTransporter() {
     cachedTransporter._driver = "smtp-url";
     return cachedTransporter;
   }
+// 3.5) Mailjet driver
+if (driver === "mailjet") {
+  const { MAILJET_API_KEY, MAILJET_SECRET_KEY } = process.env;
+  if (!MAILJET_API_KEY || !MAILJET_SECRET_KEY) {
+    throw new Error("MAIL_DRIVER=mailjet requires MAILJET_API_KEY and MAILJET_SECRET_KEY.");
+  }
+
+  const mailjetClient = Mailjet.apiConnect(MAILJET_API_KEY, MAILJET_SECRET_KEY);
+
+  cachedTransporter = {
+    async sendMail(opts) {
+      const { from, to, bcc, subject, text, html } = opts;
+
+      // Parse 'from' email
+      const fromEmail = from.match(/<(.*)>/)?.[1] || from;
+
+      // Recipients
+      const toRecipients = [].concat(to).flat().filter(Boolean);
+      const bccRecipients = [].concat(bcc).flat().filter(Boolean);
+
+      const message = {
+        Messages: [
+          {
+            From: { Email: fromEmail, Name: process.env.MAIL_FROM_NAME || "GPKMC eCampus" },
+            To: toRecipients.map(email => ({ Email: email })),
+            Bcc: bccRecipients.map(email => ({ Email: email })),
+            Subject: subject,
+            TextPart: text,
+            HTMLPart: html,
+          },
+        ],
+      };
+
+      const response = await mailjetClient.post("send", { version: "v3.1" }).request(message);
+
+      // Return similar structure to Nodemailer
+      return { messageId: response.body.Messages[0].To[0].Email, accepted: toRecipients };
+    },
+    _driver: "mailjet",
+  };
+
+  return cachedTransporter;
+}
 
   // 4) Gmail (App Password)
   if (driver === "gmail" || driver === "gmail-app") {
