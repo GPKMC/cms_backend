@@ -201,31 +201,52 @@ notificationSchema.post("save", async function(doc) {
       `,
     });
 
-    async function sendTo(list, audience) {
-      const emails = uniq(list);
-      if (!emails.length) return;
+async function sendTo(list, audience) {
+  const emails = uniq(list);
+  if (!emails.length) return;
 
-      const link = deepLinkFor(doc, audience);
-      const { text, html } = buildBodies(link);
-      const { to, bcc } = applyDebugRouting({ to: undefined, bcc: emails });
+  const link = deepLinkFor(doc, audience);
+  const { text, html } = buildBodies(link);
 
-      console.log("[notif:mail] driver=", getDriverName(), "audience=", audience);
-      console.log("[notif:mail] recipients=", to || bcc);
+  // Batch size (Mailjet allows 50 recipients per email)
+  const BATCH_SIZE = 50;
 
-      const info = await transporter.sendMail({
-        from: `${fromName} <${fromAddr}>`,
-        to,
-        bcc,
-        replyTo: `${replyToName} <${replyToEmail}>`,
-        subject,
-        text,
-        html,
-      });
+  for (let i = 0; i < emails.length; i += BATCH_SIZE) {
+    const batch = emails.slice(i, i + BATCH_SIZE);
 
-      const preview = getPreviewUrl(info);
-      if (preview) console.log(`📧 Ethereal preview (${audience}):`, preview);
-      else console.log(`📧 Email sent (${audience}):`, info.messageId);
+    // Always provide at least one "to" address; rest go in BCC
+    const to = batch[0];
+    const bcc = batch.slice(1);
+
+    const { to: debugTo, bcc: debugBcc } = applyDebugRouting({ to, bcc });
+
+    console.log("[notif:mail] driver=", getDriverName(), "audience=", audience);
+    console.log("[notif:mail] recipients=", debugTo || debugBcc);
+
+    const mailOptions = {
+      from: `${fromName} <${fromAddr}>`,
+      to: debugTo,
+      bcc: debugBcc,
+      subject,
+      text,
+      html,
+    };
+
+    // Include Reply-To if the driver is not Resend
+    if (getDriverName() !== "resend") {
+      mailOptions.replyTo = `${replyToName} <${replyToEmail}>`;
+    } else {
+      mailOptions.headers = { "Reply-To": `${replyToName} <${replyToEmail}>` };
     }
+
+    const info = await transporter.sendMail(mailOptions);
+
+    const preview = getPreviewUrl(info);
+    if (preview) console.log(`📧 Ethereal preview (${audience}):`, preview);
+    else console.log(`📧 Email sent (${audience}):`, info.messageId);
+  }
+}
+
 
     // Send per audience
     await sendTo(studentEmails, "student");

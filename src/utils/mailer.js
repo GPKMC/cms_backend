@@ -12,13 +12,13 @@ function pickDriver() {
 }
 
 export function getMailFrom() {
-  const email = (process.env.MAIL_FROM || process.env.GMAIL_USER || "noreply@gpkmc.edu.np").trim();
+  const email = (process.env.MAIL_FROM || process.env.GMAIL_USER || "noreply.gpkmc@gmail.com").trim();
   const name  = (process.env.MAIL_FROM_NAME || process.env.SENDER_DISPLAY || "GPKMC eCampus").trim();
   return { email, name };
 }
 
 export function getReplyTo({ creatorEmail, creatorName } = {}) {
-  const replyToEmail = (creatorEmail || process.env.MAIL_REPLY_FALLBACK || "noreply@gpkmc.edu.np").trim();
+  const replyToEmail = (creatorEmail || process.env.MAIL_REPLY_FALLBACK || "noreply.gpkmc@gmail.com").trim();
   const replyToName  = creatorName || "Teacher";
   return { replyToEmail, replyToName };
 }
