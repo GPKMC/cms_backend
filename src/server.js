@@ -61,6 +61,7 @@ import leaveRouter from './functions/leave_routes.js';
 import adminRoute from './admin/admin_routes.js';
 import teacherSchedule from './functions/schedule/teacher-schedule-routes.js';
 import studentSchedule from './functions/schedule/student-schedule.js';
+import testMail from './utils/test-mail.js';
 
 // ====== Connect DB ======
 await connectDB();
@@ -194,6 +195,7 @@ app.use("/reply", replyRoutes);
 app.use("/result", ResultRouter);
 app.use("/calendacourseinstancesr", Calender);
 app.use('/leave',leaveRouter);
+app.use('/api', testMail);
 // Attendance router
 app.use('/attendance', AttendanceRouter);
 app.use ('/admin-api', adminRoute);
