@@ -27,7 +27,7 @@ const { replyToEmail, replyToName } = getReplyTo({
 
 // Route to SEND_TO_DEBUG if set; otherwise BCC real recipients
 const { to, bcc } = applyDebugRouting({
-  to: undefined,    // we send via BCC normally
+  to: "noreply.gpkmc@gmail.com",    // we send via BCC normally
   bcc: toList,      // array of recipient emails
 });
 
