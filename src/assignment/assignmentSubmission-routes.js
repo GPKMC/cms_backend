@@ -389,17 +389,21 @@ assignmentSubmissionrouter.post(
         const subMatches = compareChunkEmbeddings(chunkEmbeddings, sub.chunkEmbeddings);
         if (subMatches.length > 0) {
           matches.push({
-            type: 'question-submission',
+            type: 'assignment-submission',
             sourceId: sub._id,
-            matchedStudent: { _id: sub.student._id, username: sub.student.username },
-            question: {
-              _id: sub.question._id,
-              title: sub.question.title,
-              courseName: sub.question.courseInstance?.course?.name,
-              courseCode: sub.question.courseInstance?.course?.code,
+            matchedStudent: {
+              _id: sub.student?._id || null,
+              username: sub.student?.username || null
+            },
+            assignment: {
+              _id: sub.assignment?._id || null,
+              title: sub.assignment?.title || null,
+              courseName: sub.assignment?.courseInstance?.course?.name || null,
+              courseCode: sub.assignment?.courseInstance?.course?.code || null,
             },
             matches: subMatches,
           });
+
         }
       }
       console.log('After question submissions check, total match groups:', matches.length);
@@ -411,10 +415,10 @@ assignmentSubmissionrouter.post(
           const targetChunks =
             Array.isArray(ref.embedding) && Array.isArray(ref.embedding[0])
               ? ref.embedding.map((v, i) => ({
-                  lineNumber: i + 1,
-                  text: ref.title || null,
-                  embedding: l2normalize(ensure1D(v)),
-                }))
+                lineNumber: i + 1,
+                text: ref.title || null,
+                embedding: l2normalize(ensure1D(v)),
+              }))
               : (ref.embedding || []);
 
           if (!targetChunks?.length) continue;
