@@ -380,6 +380,7 @@ assignmentSubmissionrouter.post(
             },
             matches: subMatches,
           });
+          
         }
       }
       console.log('After group submissions check, total match groups:', matches.length);
